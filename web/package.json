@@ -10,7 +10,7 @@
   "dependencies": {
     "@antv/g2plot": "^1.1.27",
     "antd": "^4.1.4",
-    "axios": "^0.20.0",
+    "axios": "^0.21.1",
     "codemirror": "^5.49.2",
     "react": "^16.13.1",
     "react-color": "^2.19.3",
