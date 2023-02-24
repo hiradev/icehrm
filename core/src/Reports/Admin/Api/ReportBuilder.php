@@ -20,7 +20,7 @@ abstract class ReportBuilder
 
     protected function execute($report, $query, $parameters)
     {
-        $report->DB()->SetFetchMode(ADODB_FETCH_ASSOC);
+        // $report->DB()->SetFetchMode(ADODB_FETCH_ASSOC);
         LogManager::getInstance()->debug("Query: ".$query);
         LogManager::getInstance()->debug("Parameters: ".json_encode($parameters));
         $rs = $report->DB()->Execute($query, $parameters);
@@ -64,7 +64,7 @@ abstract class ReportBuilder
         $fileFirstPart = "Report_".str_replace(" ", "_", $report->name)."-".date("Y-m-d_H-i-s");
         $fileName = $fileFirstPart.".csv";
 
-        $fileFullName = CLIENT_BASE_PATH.'data/'.$fileName;
+        $fileFullName = BaseService::getInstance()->getDataDirectory().$fileName;
         $fp = fopen($fileFullName, 'w');
 
         foreach ($data as $fields) {
@@ -81,12 +81,13 @@ abstract class ReportBuilder
 
         $uploadFilesToS3 = SettingsManager::getInstance()->getSetting("Files: Upload Files to S3");
         $uploadFilesToS3Key = SettingsManager::getInstance()->getSetting("Files: Amazon S3 Key for File Upload");
-        $uploadFilesToS3Secret = SettingsManager::getInstance()->getSetting("Files: Amazone S3 Secret for File Upload");
+        $uploadFilesToS3Secret = SettingsManager::getInstance()->getSetting("Files: Amazon S3 Secret for File Upload");
         $s3Bucket = SettingsManager::getInstance()->getSetting("Files: S3 Bucket");
         $s3WebUrl = SettingsManager::getInstance()->getSetting("Files: S3 Web Url");
 
         if ($uploadFilesToS3.'' == '1' && !empty($uploadFilesToS3Key)
-            && !empty($uploadFilesToS3Secret) && !empty($s3Bucket) && !empty($s3WebUrl)) {
+            && !empty($uploadFilesToS3Secret) && !empty($s3Bucket) && !empty($s3WebUrl)
+        ) {
             $uploadname = CLIENT_NAME."/".$file;
             $s3FileSys = new S3FileSystem($uploadFilesToS3Key, $uploadFilesToS3Secret);
             $res = $s3FileSys->putObject($s3Bucket, $uploadname, $fileFullName, 'authenticated-read');

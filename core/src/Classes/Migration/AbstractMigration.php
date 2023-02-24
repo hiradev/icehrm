@@ -8,6 +8,7 @@
 
 namespace Classes\Migration;
 
+use Classes\BaseService;
 use Utils\LogManager;
 
 abstract class AbstractMigration
@@ -36,8 +37,7 @@ abstract class AbstractMigration
     protected function db()
     {
         if ($this->db == null) {
-            $this->db = NewADOConnection('mysqli');
-            $res = $this->db->Connect(APP_HOST, APP_USERNAME, APP_PASSWORD, APP_DB);
+            $this->db = BaseService::getInstance()->getDB();
         }
         return $this->db;
     }
@@ -49,11 +49,17 @@ abstract class AbstractMigration
 
     public function executeQuery($sql)
     {
-        $ret = $this->db()->Execute($sql);
-        if (!$ret) {
-            $this->lastError =  $this->db()->ErrorMsg();
-            LogManager::getInstance()->error('Error in migration: '.$this->lastError);
+        try {
+            $ret = $this->db()->Execute($sql);
+            if (!$ret) {
+                $this->lastError = $this->db()->ErrorMsg();
+                LogManager::getInstance()->error('Error in migration: ' . $this->lastError);
+            }
+            return $ret;
+        } catch (\Exception $e) {
+            LogManager::getInstance()->error('Error in migration: ' . $e->getMessage());
         }
-        return $ret;
+
+        return false;
     }
 }

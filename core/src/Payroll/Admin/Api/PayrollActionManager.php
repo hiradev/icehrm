@@ -9,16 +9,23 @@
 namespace Payroll\Admin\Api;
 
 use Classes\BaseService;
+use Classes\FileService;
+use Classes\IceConstants;
 use Classes\IceResponse;
+use Classes\NotificationManager;
 use Classes\SubActionManager;
 use Company\Common\Model\CompanyStructure;
+use Documents\Common\Model\Document;
+use Documents\Common\Model\EmployeeDocument;
 use Employees\Common\Model\Employee;
+use Model\UserReport;
 use Payroll\Common\Model\Deduction;
 use Payroll\Common\Model\DeductionGroup;
 use Payroll\Common\Model\Payroll;
 use Payroll\Common\Model\PayrollCalculations;
 use Payroll\Common\Model\PayrollColumn;
 use Payroll\Common\Model\PayrollData;
+use Reports\User\Reports\PayslipReport;
 use Salary\Common\Model\EmployeeSalary;
 use Salary\Common\Model\PayrollEmployee;
 use Salary\Common\Model\SalaryComponent;
@@ -31,6 +38,12 @@ class PayrollActionManager extends SubActionManager
 {
 
     const REG_HOURS_PER_WEEK = 40;
+
+    const PAYROLL_STATUS_DRAFT = 'Draft';
+    const PAYROLL_STATUS_PROCESSING = 'Processing';
+    const PAYROLL_STATUS_PROCESSED = 'Processed';
+    const PAYROLL_STATUS_COMPLETING = 'Completing';
+    const PAYROLL_STATUS_COMPLETED = 'Completed';
 
     protected $calCache = array();
 
@@ -56,7 +69,24 @@ class PayrollActionManager extends SubActionManager
         $noColumnCalculations = false
     ) {
 
+        LogManager::getInstance()->debug(
+            sprintf(
+                'calculatePayrollColumn: col:%s payroll:%s empId:%s payrollEmpId:%s noColumnCalculations:%s',
+                $col->id,
+                $payroll->id,
+                $employeeId,
+                $payrollEmployeeId,
+                $noColumnCalculations
+            )
+        );
         $val = $this->getFromCalculationCache($col->id."-".$payroll->id."-".$employeeId);
+
+        LogManager::getInstance()->debug(
+            sprintf(
+                'calculatePayrollColumn: cached value:%s',
+                $val
+            )
+        );
         if (!empty($val)) {
             return $val;
         }
@@ -66,6 +96,12 @@ class PayrollActionManager extends SubActionManager
                 array($employeeId, $payroll->date_start, $payroll->date_end),
                 $col->calculation_hook,
                 $col->calculation_function
+            );
+            LogManager::getInstance()->debug(
+                sprintf(
+                    'calculatePayrollColumn: execute calculation hook result:%s',
+                    json_encode($valueData)
+                )
             );
             if (is_array($valueData) && $valueData[0] == 'string') {
                 $val = $valueData[1];
@@ -84,22 +120,30 @@ class PayrollActionManager extends SubActionManager
 
         //Salary
         LogManager::getInstance()->info("salary components row:".$col->salary_components);
-        if (!empty($col->salary_components) &&
-            !empty(json_decode($col->salary_components, true))) {
+        if (!empty($col->salary_components) 
+            && !empty(json_decode($col->salary_components, true))
+        ) {
             $salaryComponent = new SalaryComponent();
             $salaryComponents = $salaryComponent->Find(
                 "id in (".implode(",", json_decode($col->salary_components, true)).")",
                 array()
             );
-            LogManager::getInstance()->info("salary components:".$salaryComponents);
             foreach ($salaryComponents as $salaryComponent) {
                 $sum += $this->getTotalForEmployeeSalaryByComponent($employeeId, $salaryComponent->id);
             }
         }
 
+        LogManager::getInstance()->debug(
+            sprintf(
+                'calculatePayrollColumn: salary component sum:%s',
+                $sum
+            )
+        );
+
         //Deductions
-        if (!empty($col->deductions) &&
-            !empty(json_decode($col->deductions, true))) {
+        if (!empty($col->deductions) 
+            && !empty(json_decode($col->deductions, true))
+        ) {
             $deduction = new Deduction();
             if (empty($payRollEmp->deduction_group)) {
                 $deductions = $deduction->Find(
@@ -124,6 +168,13 @@ class PayrollActionManager extends SubActionManager
             }
         }
 
+        LogManager::getInstance()->debug(
+            sprintf(
+                'calculatePayrollColumn: sum after deductions:%s',
+                $sum
+            )
+        );
+
         if (!$noColumnCalculations) {
             $evalMath = new EvalMath();
             if ($col->function_type === 'Simple') {
@@ -131,8 +182,9 @@ class PayrollActionManager extends SubActionManager
                 $evalMath->evaluate('min(x,y) = y - (y - x) * ceil(tanh(exp(tanh(y - x)) - exp(0)))');
             }
 
-            if (!empty($col->add_columns) &&
-                !empty(json_decode($col->add_columns, true))) {
+            if (!empty($col->add_columns) 
+                && !empty(json_decode($col->add_columns, true))
+            ) {
                 $colIds = json_decode($col->add_columns, true);
                 $payrollColumn = new PayrollColumn();
                 $payrollColumns = $payrollColumn->Find("id in (".implode(",", $colIds).")", array());
@@ -147,8 +199,9 @@ class PayrollActionManager extends SubActionManager
                 }
             }
 
-            if (!empty($col->sub_columns) &&
-                !empty(json_decode($col->sub_columns, true))) {
+            if (!empty($col->sub_columns) 
+                && !empty(json_decode($col->sub_columns, true))
+            ) {
                 $colIds = json_decode($col->sub_columns, true);
                 $payrollColumn = new PayrollColumn();
                 $payrollColumns = $payrollColumn->Find("id in (".implode(",", $colIds).")", array());
@@ -163,8 +216,7 @@ class PayrollActionManager extends SubActionManager
                 }
             }
 
-            if (!empty($col->calculation_columns) &&
-                !empty(json_decode($col->calculation_columns, true)) && !empty($col->calculation_function)) {
+            if (!empty(trim($col->calculation_function))) {
                 $cc = json_decode($col->calculation_columns);
                 $func = $col->calculation_function;
                 $variableList = [];
@@ -183,6 +235,7 @@ class PayrollActionManager extends SubActionManager
                     if ($col->function_type === 'Simple') {
                         $sum += $evalMath->evaluate($func);
                     } else {
+                        $variableList = $this->updateDefaultVars($variableList, $payroll, $employeeId);
                         $sum = ScriptRunner::executeJs($variableList, $func);
                     }
                 } catch (\Exception $e) {
@@ -192,10 +245,37 @@ class PayrollActionManager extends SubActionManager
             }
         }
 
-        //return $sum;
-        $val = number_format(round($sum, 2), 2, '.', '');
-        $this->addToCalculationCache($col->id."-".$payroll->id."-".$employeeId, $val);
-        return $val;
+        if (is_numeric($sum)) {
+            $sum = number_format(round($sum, 2), 2, '.', '');
+        } else {
+            $sum = htmlentities($sum, ENT_QUOTES, 'UTF-8');
+        }
+
+        $this->addToCalculationCache($col->id."-".$payroll->id."-".$employeeId, $sum);
+        LogManager::getInstance()->debug(
+            sprintf(
+                'calculatePayrollColumn: Final value: %s',
+                $sum
+            )
+        );
+        return $sum;
+    }
+
+    private function updateDefaultVars($variableList, $payroll, $employeeId)
+    {
+        $mapping = '{"nationality":["Nationality","id","name"],'
+            .'"employment_status":["EmploymentStatus","id","name"],"job_title":["JobTitle","id","name"],'
+            .'"pay_grade":["PayGrade","id","name"],"country":["Country","code","name"],'
+            .'"province":["Province","id","name"],"department":["CompanyStructure","id","title"],'
+            .'"supervisor":["Employee","id","first_name+last_name"]}';
+
+        $employee = BaseService::getInstance()->getElement('Employee', $employeeId, $mapping, true);
+        $employee = BaseService::getInstance()->cleanUpAll($employee);
+
+        $variableList['employee'] = $employee;
+        $variableList['payroll'] = $payroll;
+
+        return $variableList;
     }
 
     private function calculateDeductionValue($employeeId, $deduction, $payroll)
@@ -339,11 +419,46 @@ class PayrollActionManager extends SubActionManager
         return $allowedIds;
     }
 
-    public function getAllData($req)
+    public function startProcessing($req)
     {
+        $payroll = new Payroll();
+        $payroll->Load("id = ?", array($req->id));
 
-        $cal = new PayrollCalculations();
+        if ($payroll->status === 'Completed') {
+            return new IceResponse(
+                IceResponse::ERROR,
+                'Payroll is already completed. Only a draft payroll can be processed'
+            );
+        }
 
+        if ($payroll->status === 'Processing') {
+            return new IceResponse(
+                IceResponse::ERROR,
+                'Payroll is currently being processed.'
+            );
+        }
+
+        $payroll->status = 'Processing';
+        $ok = $payroll->Save();
+
+        if (!$ok) {
+            LogManager::getInstance()->error('Error saving payroll: '. $payroll->ErrorMsg());
+
+            return new IceResponse(IceResponse::ERROR, 'Error saving payroll');
+        }
+
+        return new IceResponse(IceResponse::SUCCESS);
+    }
+
+
+    /**
+     * Retrieve all available data in payroll
+     *
+     * @param  $req
+     * @return IceResponse
+     */
+    public function getAllData($req, $process = false)
+    {
         $rowTable = BaseService::getInstance()->getFullQualifiedModelClassName($req->rowTable);
         $columnTable = BaseService::getInstance()->getFullQualifiedModelClassName($req->columnTable);
         $valueTable = BaseService::getInstance()->getFullQualifiedModelClassName($req->valueTable);
@@ -357,7 +472,6 @@ class PayrollActionManager extends SubActionManager
 
         //Get Child company structures
         $cssResp = CompanyStructure::getAllChildCompanyStructures($payroll->department);
-        error_log(json_encode($cssResp));
         $css = $cssResp->getData();
         $cssIds = array();
         foreach ($css as $c) {
@@ -366,10 +480,14 @@ class PayrollActionManager extends SubActionManager
 
         $employeeNamesById = array();
         $baseEmp = new Employee();
-        $baseEmpList = $baseEmp->Find(
-            "department in (".implode(",", $cssIds).") and status = ?",
-            array('Active')
-        );
+        $baseEmpList = [];
+        if (!empty($cssIds)) {
+            $baseEmpList = $baseEmp->Find(
+                "department in (".implode(",", $cssIds).") and status = ?",
+                array('Active')
+            );
+        }
+
         $empIds = array();
         foreach ($baseEmpList as $baseEmp) {
             $employeeNamesById[$baseEmp->id] = $baseEmp->first_name." ".$baseEmp->last_name;
@@ -377,14 +495,12 @@ class PayrollActionManager extends SubActionManager
         }
 
         $emp = new $rowTable();
-        $emps = $emp->Find(
-            "pay_frequency = ? and deduction_group = ? and employee in (".implode(",", $empIds).")",
-            array($payroll->pay_period, $payroll->deduction_group)
-        );
-        if (!$emps) {
-            error_log("Error:".$emp->ErrorMsg());
-        } else {
-            error_log("Employees:".json_encode($emps));
+        $emps = [];
+        if (!empty($empIds)) {
+            $emps = $emp->Find(
+                "pay_frequency = ? and deduction_group = ? and employee in (".implode(",", $empIds).")",
+                array($payroll->pay_period, $payroll->deduction_group)
+            );
         }
 
         $employees = array();
@@ -397,10 +513,13 @@ class PayrollActionManager extends SubActionManager
         }
 
         $column = new $columnTable();
-        $columns = $column->Find(
-            "enabled = ? and id in (".implode(",", $columnList).") order by colorder, id",
-            array('Yes')
-        );
+        $columns = [];
+        if (!empty($columnList)) {
+            $columns = $column->Find(
+                "enabled = ? and id in (".implode(",", $columnList).") order by colorder, id",
+                array('Yes')
+            );
+        }
 
         $cost = new $valueTable();
         $costs = $cost->Find("payroll = ?", array($req->payrollId));
@@ -415,9 +534,8 @@ class PayrollActionManager extends SubActionManager
             $valueMap[$val->employee][$val->payroll_item] = $val;
         }
 
-        //Fill hours worked
         foreach ($employees as $e) {
-            if ($payroll->status != "Completed") {
+            if ($process) {
                 foreach ($columns as $column) {
                     if (isset($valueMap[$e->id][$column->id]) && $column->editable == "Yes") {
                         $this->addToCalculationCache(
@@ -446,18 +564,21 @@ class PayrollActionManager extends SubActionManager
 
         if ($save == "1") {
             foreach ($values as $value) {
-                if (empty($value->id)) {
-                    $value->Save();
+                // Check if value exists
+                $existingItem = new PayrollData();
+                $existingItem->Load(
+                    'payroll = ? and employee = ? and payroll_item = ?',
+                    [$value->payroll, $value->employee, $value->payroll_item]
+                );
+
+                if (!empty($existingItem->id)) {
+                    $value->id = $existingItem->id;
                 }
+                $value->Save();
             }
         }
 
-        if ($payroll->status == 'Processing') {
-            $payroll->status =  'Completed';
-            $payroll->Save();
-        }
-
-        if ($payroll->status == 'Completed') {
+        if ($payroll->status == PayrollActionManager::PAYROLL_STATUS_COMPLETED) {
             $newCols = array();
             foreach ($columns as $col) {
                 $col->editable = 'No';
@@ -465,26 +586,207 @@ class PayrollActionManager extends SubActionManager
             }
             $columns = $newCols;
         }
+
         return new IceResponse(IceResponse::SUCCESS, array($employees,$columns,$values));
     }
 
-    public function updateAllData($req)
+    private function movePayslipFile($filePath, $payroll, $employeeId, $ext)
     {
 
-        $resp = $this->updateData($req);
-
-        if ($resp->getStatus() == IceResponse::SUCCESS) {
-            $payroll = new Payroll();
-            $payroll->Load("id = ?", array($req->payrollId));
-            $payroll->status = 'Processing';
-            $ok = $payroll->Save();
-            if (!$ok) {
-                return new IceResponse(IceResponse::ERROR, $payroll->ErrorMsg());
-            }
+        $payslipFileHash = $this->getPayrollHash($payroll, $employeeId);
+        $file = new \Model\File();
+        $file->Load("name = ? and employee = ?", [$payslipFileHash, $employeeId]);
+        if (!empty($file->id)) {
+            FileService::getInstance()->deleteFileFromDisk($file);
         }
-        return $resp;
+        $newLocalFile = BaseService::getInstance()->getDataDirectory().$payslipFileHash.'.'.$ext;
+        rename($filePath, $newLocalFile);
+
+
+        return $payslipFileHash;
     }
 
+    /**
+     * Trigger when the finalize button is clicked
+     *
+     * @param  $req
+     * @return IceResponse
+     */
+    public function updateAllData($req)
+    {
+        //$resp = $this->updateData($req);
+        $payroll = new Payroll();
+        $payroll->Load("id = ?", array($req->payrollId));
+
+        if ($payroll->status === PayrollActionManager::PAYROLL_STATUS_COMPLETED) {
+            return new IceResponse(
+                IceResponse::ERROR,
+                'Payroll is already completed. Only a processed payroll can be completed'
+            );
+        }
+
+        if ($payroll->status === PayrollActionManager::PAYROLL_STATUS_COMPLETING) {
+            return new IceResponse(
+                IceResponse::ERROR,
+                'Payroll is currently being completed.'
+            );
+        }
+
+        $payroll->status = PayrollActionManager::PAYROLL_STATUS_COMPLETING;
+        $ok = $payroll->Save();
+
+        if (!$ok) {
+            LogManager::getInstance()->error('Error saving payroll: '. $payroll->ErrorMsg());
+
+            return new IceResponse(IceResponse::ERROR, 'Error saving payroll');
+        }
+
+        return new IceResponse(IceResponse::SUCCESS);
+    }
+
+    /**
+     * Completion step of the payroll
+     *
+     * @param  $payrollId
+     * @return IceResponse
+     */
+    public function generatePayslips($payrollId)
+    {
+
+        $payroll = new Payroll();
+        $payroll->Load("id = ?", array($payrollId));
+
+        if ($payroll->status != PayrollActionManager::PAYROLL_STATUS_COMPLETING) {
+            return new IceResponse(
+                IceResponse::ERROR,
+                'Payroll is not in a expected state'
+            );
+        }
+
+        // Send payslip notification to the employees
+
+        //Get Child company structures
+        $cssResp = CompanyStructure::getAllChildCompanyStructures($payroll->department);
+        $css = $cssResp->getData();
+        $cssIds = array();
+        foreach ($css as $c) {
+            $cssIds[] = $c->id;
+        }
+
+        $baseEmp = new Employee();
+        $baseEmpList = [];
+        if (!empty($cssIds)) {
+            $baseEmpList = $baseEmp->Find(
+                "department in (".implode(",", $cssIds).") and status = ?",
+                array('Active')
+            );
+        }
+
+        $empIds = array();
+        foreach ($baseEmpList as $baseEmp) {
+            $employeeNamesById[$baseEmp->id] = $baseEmp->first_name." ".$baseEmp->last_name;
+            $empIds[] = $baseEmp->id;
+        }
+
+        $emp = new PayrollEmployee();
+        $emps = [];
+        if(!empty($empIds)) {
+            $emps = $emp->Find(
+                "pay_frequency = ? and deduction_group = ? and employee in (".implode(",", $empIds).")",
+                array($payroll->pay_period, $payroll->deduction_group)
+            );
+        }
+
+        $report = new UserReport();
+        $report->Load('name = ?', ['Download Payslips']);
+
+        $docType = new Document();
+        $docType->Load('name = ?', ['Payslip']);
+
+        if (empty($docType->id)) {
+            // Create a new type
+            $docType->name = 'Payslip';
+            $docType->details = '';
+            $docType->expire_notification = 'No';
+            $docType->expire_notification_month = 'No';
+            $docType->expire_notification_day = 'No';
+            $docType->sign = 'No';
+            $docType->created = date("Y-m-d H:i:s");
+            $docType->updated = date("Y-m-d H:i:s");
+            $docType->share_with_employee = 'Yes';
+
+            $docType->Save();
+        }
+
+        foreach ($emps as $emp) {
+            $e = new Employee();
+            $e->Load('id = ?', [$emp->employee]);
+            $cls = new PayslipReport();
+            $request = [];
+            $request['payroll'] = $payroll->id;
+            $cls->setEmployee($e);
+            $data = $cls->getData($report, $request);
+            if (empty($data)) {
+                continue;
+            }
+            $reportCreationData = $cls->createReportFile($report, $data);
+            $ext = str_replace($reportCreationData[0].'.', '', $reportCreationData[1]);
+
+            $fileName = $this->movePayslipFile($reportCreationData[2], $payroll, $e->id, $ext);
+
+            FileService::getInstance()->saveEmployeeDocument(
+                $payroll->name,
+                sprintf('%s - Payslip for the payroll period %s to %s', $payroll->name, $payroll->date_start, $payroll->date_end),
+                $fileName,
+                $ext,
+                $e->id,
+                $docType,
+                'Admin',
+                true,
+                true
+            );
+
+            $payslipFileHash = $this->getPayrollHash($payroll, $emp->employee);
+
+            $doc = new EmployeeDocument();
+            $doc->Load('attachment = ? and employee = ?', [$payslipFileHash, $emp->employee]);
+            if (empty($doc->id)) {
+                continue;
+            }
+
+            $notificationMsg = sprintf(
+                'Your Payslip for the period %s to %s can be downloaded via My Documents section.',
+                $payroll->date_start,
+                $payroll->date_end
+            );
+
+            $doc->visible_to = 'Owner Only';
+            $doc->Save();
+
+            BaseService::getInstance()->notificationManager->addNotification(
+                $emp->employee,
+                $notificationMsg,
+                '{"type":"url","url":"g=modules&n=documents&m=module_Documents"}',
+                'Payroll'
+            );
+        }
+
+        $payroll->status = self::PAYROLL_STATUS_COMPLETED;
+        $ok = $payroll->Save();
+        if (!$ok) {
+            return new IceResponse(IceResponse::ERROR, $payroll->ErrorMsg());
+        }
+
+        return new IceResponse(IceResponse::SUCCESS);
+    }
+
+    /**
+     * When a single cell in payroll table is updated, this function will be called
+     * to save data
+     *
+     * @param  $req
+     * @return IceResponse
+     */
     public function updateData($req)
     {
         $payroll = new Payroll();
@@ -512,6 +814,9 @@ class PayrollActionManager extends SubActionManager
                 LogManager::getInstance()->error("Error saving payroll data:".$data->ErrorMsg());
             }
         }
+
+        $payroll->status = PayrollActionManager::PAYROLL_STATUS_DRAFT;
+        $ok = $payroll->Save();
 
         return new IceResponse(IceResponse::SUCCESS, true);
     }
@@ -572,5 +877,16 @@ class PayrollActionManager extends SubActionManager
         }
 
         return new IceResponse(IceResponse::SUCCESS);
+    }
+
+    /**
+     * @param $payroll
+     * @param $employeeId
+     * @return string
+     */
+    private function getPayrollHash($payroll, $employeeId)
+    {
+        $payslipFileHash = md5($payroll->id . $employeeId . $payroll->date_start . $payroll->date_end);
+        return $payslipFileHash;
     }
 }

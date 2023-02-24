@@ -5,10 +5,12 @@ use Classes\BaseService;
 use Classes\FileService;
 use Classes\IceResponse;
 use Classes\ModuleAccess;
+use Classes\PermissionManager;
 use Company\Common\Model\CompanyStructure;
 use Metadata\Common\Model\Country;
 use Model\BaseModel;
 use Model\CustomFieldTrait;
+use Model\File;
 
 class Employee extends BaseModel
 {
@@ -203,7 +205,8 @@ class Employee extends BaseModel
     {
 
         $employee = new Employee();
-        if (BaseService::getInstance()->currentUser->user_level != 'Admin') {
+
+        if (BaseService::getInstance()->currentUser->user_level != 'Admin' && !EmployeeAccess::hasAccessToAllEmployeeData()) {
             $cemp = BaseService::getInstance()->getCurrentProfileId();
             $list = $employee->Find("status = ? and supervisor = ?", array('Active', $cemp));
         } else {
@@ -248,6 +251,11 @@ class Employee extends BaseModel
             new ModuleAccess('employees', 'admin'),
             new ModuleAccess('employees', 'user'),
         ];
+    }
+
+    public function postProcessGetElement($obj)
+    {
+        return FileService::getInstance()->updateProfileImage($obj);
     }
 
     public $table = 'Employees';

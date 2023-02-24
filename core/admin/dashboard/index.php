@@ -4,6 +4,7 @@
  Developer: Thilina Hasantha (http://lk.linkedin.com/in/thilinah | https://github.com/thilinah)
  */
 
+use Classes\AbstractModuleManager;
 use Classes\BaseService;
 use Classes\LanguageManager;
 
@@ -15,6 +16,7 @@ include APP_BASE_PATH.'modulejslibs.inc.php';
 
 $moduleManagers = BaseService::getInstance()->getModuleManagers();
 $dashBoardList = array();
+/** @var AbstractModuleManager $moduleManagerObj */
 foreach($moduleManagers as $moduleManagerObj){
 
     //Check if this is not an admin module
@@ -67,7 +69,7 @@ foreach($dashBoardList as $k=>$v){
         <div class="col-lg-4 col-xs-12">
             <div id="TaskListLoader" style="width:100%;"></div>
             <div id="TaskListWrap" style="display: none;box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.24);border: none;margin-bottom: 20px; padding:25px;">
-                <h4>Tasks to Attend</h4>
+                <h4><?=t('Task List')?></h4>
                 <div id="TaskList" style="margin-left: 10px; margin-top: 30px;"></div>
             </div>
         </div>
@@ -78,6 +80,27 @@ foreach($dashBoardList as $k=>$v){
             echo LanguageManager::translateTnrText($v);
         }
         ?>
+        <?php if (BaseService::getInstance()->isOpenSourceVersion()) {?>
+        <div class="col-lg-3 col-xs-12">
+
+            <div class="small-box bg-yellow">
+                <div class="inner">
+                    <h3>
+                        <t>Buy Extensions</t>
+                    </h3>
+                    <p>
+                        <t>Purchase New Extensions</t>
+                    </p>
+                </div>
+                <div class="icon">
+                    <i class="fa fa-store"></i>
+                </div>
+                <a target="_blank" href="https://icehrm.com/explore/extensions/" class="small-box-footer">
+                    <t>Purchase</t> <t>Extensions</t> <i class="fa fa-arrow-circle-right"></i>
+                </a>
+            </div>
+        </div>
+        <?php } ?>
     </div>
 
 </div>

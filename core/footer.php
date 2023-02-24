@@ -1,3 +1,13 @@
+<?php
+
+use Classes\GoogleUserDataManager;
+use Classes\SettingsManager;
+use Utils\InputCleaner;
+
+$googleConfigFound = !empty(trim(SettingsManager::getInstance()->getSetting('System: Google Client Secret Path')));
+$isGoogleConnected = GoogleUserDataManager::isConnected(\Classes\BaseService::getInstance()->getCurrentUser());
+$userDomain = explode('@', $user->email)[1];
+?>
 </section><!-- /.content -->
             </aside><!-- /.right-side -->
         </div><!-- ./wrapper -->
@@ -18,10 +28,11 @@
 				modJsList[prop].setUser(<?=json_encode(\Classes\BaseService::getInstance()->cleanUpUser($user))?>);
                 modJsList[prop].initSourceMappings();
 				modJsList[prop].setBaseUrl('<?=BASE_URL?>');
+				modJsList[prop].setClientUrl('<?=CLIENT_BASE_URL?>');
 				modJsList[prop].setCurrentProfile(<?=json_encode($activeProfile)?>);
 				modJsList[prop].setInstanceId('<?=\Classes\BaseService::getInstance()->getInstanceId()?>');
 				modJsList[prop].setGoogleAnalytics(ga);
-				modJsList[prop].setNoJSONRequests('<?=\Classes\SettingsManager::getInstance()->getSetting("System: Do not pass JSON in request")?>');
+				modJsList[prop].setNoJSONRequests('<?=SettingsManager::getInstance()->getSetting("System: Do not pass JSON in request")?>');
 			}
 
 	    }
@@ -132,7 +143,7 @@
 					$("[ref = '"+refId+"'] a").first().click();
 				<?php }?>
 			<?php } else{?>
-				refId = '<?=$_REQUEST['m']?>';
+				refId = '<?=InputCleaner::escape($_REQUEST['m'])?>';
 				$("[ref = '"+refId+"'] a").first().click();
 			<?php }?>
 
@@ -140,13 +151,17 @@
 			$("#verifyModel").modal({
 				  backdrop: 'static'
 			});
-			<?php }?>
+			<?php } elseif (($moduleName === 'leaves' || $moduleName === 'candidates')  && !$isGoogleConnected && $googleConfigFound) {?>
+              // Show google connect only when verify modal is not shown
+              modJs.checkIfUserEmailIsGoogleDomain('<?=$userDomain?>');
+            <?php }?>
 
 		});
 
-
 	</script>
-	<?php include 'popups.php';?>
+	<?php
+        include 'popups.php';
+    ?>
     <script src="<?=BASE_URL?>js/bootstrap-datatable.js"></script>
     <div id="jt" t="<?=$jwtService->create(3600)?>"></div>
     </body>

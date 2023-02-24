@@ -41,11 +41,15 @@ class ReactModalAdapterBase extends AdapterBase {
   }
 
   setAccess(access) {
-    this.access = access;
+    const tmp = [];
+    for ( const index in access ){
+      tmp.push( access[ index ] );
+    }
+    this.access = tmp;
   }
 
   hasAccess(type) {
-    return this.access.indexOf(type) > 0;
+    return this.access.indexOf(type) >= 0;
   }
 
   hasCustomButtons() {
@@ -95,6 +99,14 @@ class ReactModalAdapterBase extends AdapterBase {
     return true;
   }
 
+  keepTableVisibleWhileShowingCustomView() {
+    return false;
+  }
+
+  getFormLayout(viewOnly) {
+    return 'horizontal';
+  }
+
   initForm() {
     if (this.formInitialized) {
       return false;
@@ -103,6 +115,7 @@ class ReactModalAdapterBase extends AdapterBase {
     if (this.modalType === this.MODAL_TYPE_NORMAL) {
       ReactDOM.render(
         <IceFormModal
+          title={this.title || undefined}
           ref={this.formContainer}
           fields={this.getFormFields()}
           adapter={this}
@@ -127,6 +140,7 @@ class ReactModalAdapterBase extends AdapterBase {
       this.filtersContainer = React.createRef();
       ReactDOM.render(
         <IceFormModal
+          title={this.title || undefined}
           ref={this.filtersContainer}
           fields={this.getFilters()}
           adapter={this}
@@ -178,7 +192,7 @@ class ReactModalAdapterBase extends AdapterBase {
           {` ${adapter.gt('Delete')}`}
         </Tag>
         )}
-        {adapter.hasAccess('save')
+        {adapter.hasAccess('save') && adapter.showAddNew
         && (
         <Tag color="cyan" onClick={() => modJs.copyRow(record.id)} style={{ cursor: 'pointer' }}>
           <CopyOutlined />
@@ -214,6 +228,10 @@ class ReactModalAdapterBase extends AdapterBase {
     this.renderForm(element, true);
   }
 
+  hideElement() {
+    this.tableContainer.current.setCurrentElement(false);
+  }
+
   /**
    * Show the edit form for an item
    * @method edit
@@ -225,10 +243,15 @@ class ReactModalAdapterBase extends AdapterBase {
     this.getElement(id, []);
   }
 
+  getDefaultValues() {
+    return null;
+  }
+
   renderForm(object = null, viewOnly = false) {
     if (object == null) {
       this.currentId = null;
       this.currentElement = null;
+      object = this.getDefaultValues();
     }
     this.setTableLoading(false);
     this.initForm();
@@ -256,7 +279,9 @@ class ReactModalAdapterBase extends AdapterBase {
     this.initTable();
     this.masterDataReader.updateAllMasterData()
       .then(() => {
-        this.tableContainer.current.reload();
+        if (this.tableContainer) {
+          this.tableContainer.current.reload();
+        }
       });
 
     this.trackEvent('get', this.tab, this.table);
@@ -280,11 +305,23 @@ class ReactModalAdapterBase extends AdapterBase {
     });
   }
 
+  hasCustomTopButtons() {
+    return false;
+  }
+
+  getCustomTopButtons() {
+    return (<></>);
+  }
+
   getFormOptions() {
     return {
       width: 1024,
       twoColumnLayout: false,
     };
+  }
+
+  getWidth() {
+    return 800;
   }
 }
 

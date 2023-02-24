@@ -18,6 +18,7 @@ class EmployeeAdapter extends ReactModalAdapterBase {
   constructor(endPoint, tab, filter, orderBy) {
     super(endPoint, tab, filter, orderBy);
     this.fieldNameMap = {};
+    this.fieldNameMapOrig = {};
     this.hiddenFields = {};
     this.tableFields = {};
     this.formOnlyFields = {};
@@ -29,6 +30,7 @@ class EmployeeAdapter extends ReactModalAdapterBase {
     for (let i = 0; i < fields.length; i++) {
       field = fields[i];
       this.fieldNameMap[field.name] = field;
+      this.fieldNameMapOrig[field.textOrig] = field.textMapped;
       if (field.display === 'Hidden') {
         this.hiddenFields[field.name] = field;
       } else if (field.display === 'Table and Form') {
@@ -178,7 +180,7 @@ class EmployeeAdapter extends ReactModalAdapterBase {
       ['last_name', { label: 'Last Name', type: 'text', validation: '' }],
       ['nationality', { label: 'Nationality', type: 'select2', 'remote-source': ['Nationality', 'id', 'name'] }],
       ['birthday', { label: 'Date of Birth', type: 'date', validation: '' }],
-      ['gender', { label: 'Gender', type: 'select', source: [['Male', 'Male'], ['Female', 'Female'], ['Other', 'Other']] }],
+      ['gender', { label: 'Gender', type: 'select', source: [['Male', 'Male'], ['Female', 'Female'], ['Non-binary', 'Non-binary'], ['Other', 'Other'], ['Prefer not to say', 'Prefer not to say']] }],
       ['marital_status', { label: 'Marital Status', type: 'select', source: [['Married', 'Married'], ['Single', 'Single'], ['Divorced', 'Divorced'], ['Widowed', 'Widowed'], ['Other', 'Other']] }],
       ssn_num,
       ['nic_num', { label: 'NIC', type: 'text', validation: 'none' }],
@@ -291,6 +293,10 @@ class EmployeeAdapter extends ReactModalAdapterBase {
     }
 
     return this.addActualFields(steps, fields);
+  }
+
+  getMappedText(text) {
+    return this.fieldNameMapOrig[text] ? this.fieldNameMapOrig[text] : text;
   }
 
   addActualFields(steps, fields) {
@@ -832,7 +838,29 @@ class ApiAccessAdapter extends AdapterBase {
     this.token = token;
   }
 
+  getOneTimeLoginCode() {
+    const reqJson = JSON.stringify({url: this.apiUrl, token: this.token});
+    const callBackData = [];
+    callBackData.callBackData = [];
+    callBackData.callBackSuccess = 'loginCodeSuccessCallback';
+    callBackData.callBackFail = 'loginCodeFailCallBack';
+
+    this.customAction('getLoginCode', 'modules=employees', reqJson, callBackData, false);
+
+  }
+
+  loginCodeSuccessCallback(callBackData) {
+    $('#loginCode').html(callBackData.data);
+  }
+
+  loginCodeFailCallBack(callBackData) {
+    this.showMessage('Error', 'Error occurred while requesting login code. Please contact team@icehrm.com.')
+  }
+
   get() {
+    const that = this;
+    $('#loginCode button').on("click", function(){ that.getOneTimeLoginCode() });
+
     const canvas = document.getElementById('apiQRcode');
     QRCode.toCanvas(canvas, JSON.stringify({
       key: 'IceHrm',

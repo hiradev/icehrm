@@ -1,4 +1,7 @@
 <?php
+
+use Employees\Common\Model\EmployeeAccess;
+
 define('CLIENT_PATH', dirname(__FILE__));
 include("config.base.php");
 include("include.common.php");
@@ -9,6 +12,7 @@ if (!defined('MODULE_PATH')) {
 include("server.includes.inc.php");
 if (empty($user)) {
     $ret['status'] = "ERROR";
+    $ret['code'] = "NO_USER_FOUND";
     echo json_encode($ret);
     exit();
 }
@@ -22,7 +26,9 @@ $cleaner = new \Classes\DomainAwareInputCleaner();
 $_REQUEST['t'] = $cleaner->cleanTableColumn($_REQUEST['t']);
 $_REQUEST['ft'] = $cleaner->cleanFilters($_REQUEST['ft']);
 $_REQUEST['ob'] = $cleaner->cleanOrderBy($_REQUEST['ob']);
-$_REQUEST['sSearch'] = $cleaner->cleanSearch($_REQUEST['sSearch']);
+if (isset($_REQUEST['sSearch'])) {
+    $_REQUEST['sSearch'] = $cleaner->cleanSearch($_REQUEST['sSearch']);
+}
 $_REQUEST['cl'] = $cleaner->cleanColumns($_REQUEST['cl']);
 
 $columns = json_decode($_REQUEST['cl'], true);
@@ -52,6 +58,11 @@ if (isset($_REQUEST['skip']) && $_REQUEST['type'] = "1") {
     $skipProfileRestriction = true;
 }
 
+// Override subordinate parameter if user has all employee access
+//if (EmployeeAccess::hasAccessToAllEmployeeData()) {
+//    $skipProfileRestriction = true;
+//}
+
 $sortData = \Classes\BaseService::getInstance()->getSortingData($_REQUEST);
 $data = \Classes\BaseService::getInstance()->getData(
     $_REQUEST['t'],
@@ -60,7 +71,7 @@ $data = \Classes\BaseService::getInstance()->getData(
     $_REQUEST['ob'],
     $sLimit,
     $_REQUEST['cl'],
-    $_REQUEST['sSearch'],
+    isset($_REQUEST['sSearch']) ? $_REQUEST['sSearch'] : '',
     $isSubOrdinates,
     $skipProfileRestriction,
     $sortData
@@ -88,17 +99,41 @@ if (!isset($_REQUEST['objects'])) {
         }
     }
 
+    $searchTerm = isset($_REQUEST['sSearch']) ? $_REQUEST['sSearch'] : '';
+    $searchColumns = $_REQUEST['cl'];
+    $searchQuery = '';
+    $searchQueryData = [];
+    $totalRows = 0;
+    if (!empty($searchTerm) && !empty($searchColumns)) {
+        $searchColumnList = json_decode($searchColumns);
+        $searchColumnList = array_diff($searchColumnList, $obj->getVirtualFields());
+        if (!empty($searchColumnList)) {
+            $searchQuery = " and (";
+            foreach ($searchColumnList as $col) {
+                if ($searchQuery != " and (") {
+                    $searchQuery.=" or ";
+                }
+                $searchQuery.=$col." like ?";
+                $searchQueryData[] = "%".$searchTerm."%";
+            }
+            $searchQuery.=")";
+        }
+    }
+
 
     if (in_array($table, \Classes\BaseService::getInstance()->userTables)
         && !$skipProfileRestriction && !$isSubOrdinates) {
+        //Get data for user table.
+        // E.g: an employee loading attendnace data
         $cemp = \Classes\BaseService::getInstance()->getCurrentProfileId();
-        $sql = "Select count(id) as count from "
-            . $obj->_table . " where " . SIGN_IN_ELEMENT_MAPPING_FIELD_NAME . " = ? " . $countFilterQuery;
+        $countQuery = ' AND '.SIGN_IN_ELEMENT_MAPPING_FIELD_NAME . " = ? " . $countFilterQuery.$searchQuery;
         array_unshift($countFilterQueryData, $cemp);
-
-        $rowCount = $obj->DB()->Execute($sql, $countFilterQueryData);
+        $queryParams = array_merge($countFilterQueryData, $searchQueryData);
+        $totalRows = $obj->getTotalCount($countQuery, $queryParams);
     } else {
+        // Not a user table, means an admin or a manager loading employee data
         if ($isSubOrdinates) {
+            // Loading subordinates
             $cemp = \Classes\BaseService::getInstance()->getCurrentProfileId();
             $profileClass = \Classes\BaseService::getInstance()->getFullQualifiedModelClassName(
                 ucfirst(SIGN_IN_ELEMENT_MAPPING_FIELD_NAME)
@@ -111,8 +146,8 @@ if (!isset($_REQUEST['objects'])) {
 
             if ($obj->getUserOnlyMeAccessField() == 'id'
                 && \Classes\SettingsManager::getInstance()->getSetting(
-		            'System: Company Structure Managers Enabled'
-	            ) == 1
+                    'System: Company Structure Managers Enabled'
+                ) == 1
                 && \Company\Common\Model\CompanyStructure::isHeadOfCompanyStructure($cempObj->department, $cemp)
             ) {
                 if (empty($subordinates)) {
@@ -121,11 +156,11 @@ if (!isset($_REQUEST['objects'])) {
 
                 $childCompaniesIds = array();
                 if (\Classes\SettingsManager::getInstance()->getSetting(
-		                'System: Child Company Structure Managers Enabled'
-	                ) == '1'
+                    'System: Child Company Structure Managers Enabled'
+                ) == '1'
                 ) {
                     $childCompaniesResp = \Company\Common\Model\CompanyStructure::getAllChildCompanyStructures(
-	                    $cempObj->department
+                        $cempObj->department
                     );
                     $childCompanies = $childCompaniesResp->getObject();
 
@@ -167,27 +202,17 @@ if (!isset($_REQUEST['objects'])) {
                     }
                 }
             }
-            $sql = "Select count(id) as count from " . $obj->_table .
-	            " where " . $obj->getUserOnlyMeAccessField() . " in (" . $subordinatesIds . ") "
-	            . $countFilterQuery;
-            $rowCount = $obj->DB()->Execute($sql, $countFilterQueryData);
-        } else {
-            $sql = "Select count(id) as count from " . $obj->_table;
-            if (!empty($countFilterQuery)) {
-                $sql .= " where 1=1 " . $countFilterQuery;
+            if (empty($subordinatesIds)) {
+                $subordinatesIds = '0';
             }
-            $rowCount = $obj->DB()->Execute($sql, $countFilterQueryData);
+            $countQuery = ' AND '.$obj->getUserOnlyMeAccessField() . " in (" . $subordinatesIds . ") " . $countFilterQuery.$searchQuery;
+            $totalRows = $obj->getTotalCount($countQuery, array_merge($countFilterQueryData, $searchQueryData));
+        } else {
+            $totalRows = $obj->getTotalCount($countFilterQuery.$searchQuery, array_merge($countFilterQueryData, $searchQueryData));
         }
     }
 }
 
-if (isset($rowCount) && !empty($rowCount)) {
-    foreach ($rowCount as $cnt) {
-        $totalRows = $cnt['count'];
-    }
-} else {
-    $totalRows = 0;
-}
 
 /*
  * Output
@@ -215,7 +240,7 @@ if (isset($_REQUEST['version']) && $_REQUEST['version'] === 'v2') {
         \Utils\LogManager::getInstance()->notifyException($e);
         echo json_encode(['status' => 'Error']);
     }
-}else if (!isset($_REQUEST['objects'])) {
+} elseif (!isset($_REQUEST['objects'])) {
     $output = array(
         "sEcho" => intval($_REQUEST['sEcho']),
         "iTotalRecords" => $totalRows,

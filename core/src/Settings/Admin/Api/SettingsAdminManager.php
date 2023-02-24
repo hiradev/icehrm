@@ -9,10 +9,16 @@
 namespace Settings\Admin\Api;
 
 use Classes\AbstractModuleManager;
+use Classes\SystemTasks\SystemTasksService;
 use Settings\Rest\SettingsRestEndPoint;
 
 class SettingsAdminManager extends AbstractModuleManager
 {
+
+    public function initialize()
+    {
+        SystemTasksService::getInstance()->registerTaskCreator((new SettingTaskCreator()));
+    }
 
     public function initializeUserClasses()
     {
@@ -39,9 +45,11 @@ class SettingsAdminManager extends AbstractModuleManager
 
     public function setupRestEndPoints()
     {
-        \Classes\Macaw::get(REST_API_PATH.'settings', function () {
-            $restEndPoint = new SettingsRestEndPoint();
-            $restEndPoint->process('getMobileSettings', []);
-        });
+        \Classes\Macaw::get(
+            REST_API_PATH.'settings', function () {
+                $restEndPoint = new SettingsRestEndPoint();
+                $restEndPoint->process('getMobileSettings', []);
+            }
+        );
     }
 }

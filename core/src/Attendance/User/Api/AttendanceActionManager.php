@@ -85,7 +85,7 @@ class AttendanceActionManager extends SubActionManager
 
         //compare dates
         if (!empty($openPunch->in_time) && strtotime($dateTime) <= strtotime($openPunch->in_time)) {
-            return new IceResponse(IceResponse::ERROR, "Punch-in time should be lesser than Punch-out time");
+            return new IceResponse(IceResponse::ERROR, "Punch-in time should be earlier than Punch-out time");
         }
 
         //Find all punches for the day
@@ -130,13 +130,17 @@ class AttendanceActionManager extends SubActionManager
         }
         if (!empty($openPunch->in_time)) {
             $openPunch->out_time = $dateTime;
-            $openPunch->note = $req->note;
+            if (empty($openPunch->note)) {
+                $openPunch->note = $req->note;
+            } else {
+                $openPunch->note .= " | ";
+                $openPunch->note .= $req->note;
+            }
             $openPunch->image_out = $req->image;
             $openPunch->out_ip = NetworkUtils::getClientIp();
             $this->baseService->audit(IceConstants::AUDIT_ACTION, "Punch Out \ time:".$openPunch->out_time);
         } else {
             $openPunch->in_time = $dateTime;
-            //$openPunch->out_time = '0000-00-00 00:00:00';
             $openPunch->note = $req->note;
             $openPunch->image_in = $req->image;
             $openPunch->employee = $employee->id;
@@ -147,7 +151,7 @@ class AttendanceActionManager extends SubActionManager
 
         if (!$ok) {
             LogManager::getInstance()->info($openPunch->ErrorMsg());
-            return new IceResponse(IceResponse::ERROR, "Error occured while saving attendance");
+            return new IceResponse(IceResponse::ERROR, "Error occurred while saving attendance");
         }
         return new IceResponse(IceResponse::SUCCESS, $openPunch);
     }

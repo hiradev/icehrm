@@ -3,7 +3,10 @@
 use Classes\BaseService;
 use Classes\IceResponse;
 use Classes\PasswordManager;
+use Classes\Pdf\PDFRegister;
+use Classes\SettingsManager;
 use Metadata\Common\Model\SupportedLanguage;
+use Model\File;
 use Users\Common\Model\User;
 use Utils\LogManager;
 use Classes\Exception\IceHttpException;
@@ -24,6 +27,7 @@ $userLevelArray = ['Admin', 'Manager', 'Employee', 'Restricted Admin', 'Restrict
 if($_REQUEST['a'] != "rsp" && $_REQUEST['a'] != "rpc"){
 	if(empty($user) || empty($user->email) ||  empty($user->id) || !in_array($user->user_level, $userLevelArray)){
 		$ret['status'] = "ERROR";
+        $ret['code'] = "NO_USER_FOUND";
 		echo json_encode($ret);
 		exit();
 	}
@@ -88,6 +92,7 @@ try {// Domain aware input cleanup
             $ret['status'] = IceResponse::SUCCESS;
         } else {
             $ret['status'] = IceResponse::ERROR;
+            $ret['data'] = $response->getData();
         }
 
     } else if ($action == 'getFieldValues') {
@@ -173,19 +178,20 @@ try {// Domain aware input cleanup
         $type = strtolower(substr($file->filename, strrpos($file->filename, ".") + 1));
         if ($file->name == $name) {
             $ret['status'] = "SUCCESS";
-            if (\Classes\SettingsManager::getInstance()->getSetting("Files: Upload Files to S3") == '1') {
-                $uploadFilesToS3Key = \Classes\SettingsManager::getInstance()->getSetting("Files: Amazon S3 Key for File Upload");
-                $uploadFilesToS3Secret = \Classes\SettingsManager::getInstance()->getSetting("Files: Amazone S3 Secret for File Upload");
+            $file->ext = explode('.', $file->filename)[1];
+            if (SettingsManager::getInstance()->getSetting("Files: Upload Files to S3") == '1') {
+                $uploadFilesToS3Key = SettingsManager::getInstance()->getSetting("Files: Amazon S3 Key for File Upload");
+                $uploadFilesToS3Secret = SettingsManager::getInstance()->getSetting("Files: Amazon S3 Secret for File Upload");
                 $s3FileSys = new \Classes\S3FileSystem($uploadFilesToS3Key, $uploadFilesToS3Secret);
-                $s3WebUrl = \Classes\SettingsManager::getInstance()->getSetting("Files: S3 Web Url");
+                $s3WebUrl = SettingsManager::getInstance()->getSetting("Files: S3 Web Url");
                 $fileUrl = $s3WebUrl . CLIENT_NAME . "/" . $file->filename;
                 $fileUrl = $s3FileSys->generateExpiringURL($fileUrl);
                 $file->filename = $fileUrl;
 
             } else {
-                $file->filename = CLIENT_BASE_URL . 'data/' . $file->filename;
+                $file->filename = \Classes\FileService::getInstance()->getLocalSecureUrl($file->filename);
             }
-            $ret['data'] = $file;
+            $ret['data'] = BaseService::getInstance()->cleanUpAll($file);
         } else {
             $ret['status'] = "ERROR";
         }
@@ -193,21 +199,59 @@ try {// Domain aware input cleanup
         $fileName = $_REQUEST['file'];
         $fileName = str_replace("..", "", $fileName);
         $fileName = str_replace("/", "", $fileName);
-        $fileName = CLIENT_BASE_PATH . 'data/' . $fileName;
-        if (!file_exists($fileName)) {
+
+        $file = new File();
+        $file->Load('name = ?', array($fileName));
+
+        if ($fileName !== $file->name) {
+            $file->Load('filename = ?', array($fileName));
+        }
+
+        if (empty($file->id)) {
             exit;
         }
+
+        if (!file_exists(BaseService::getInstance()->getDataDirectory() . $file->filename)) {
+            exit;
+        }
+
+        $extension = explode('.', $file->filename)[1];
+        $seconds_to_cache = 3600;
+        $ts = gmdate("D, d M Y H:i:s", time() + $seconds_to_cache) . " GMT";
         header('Content-Description: File Transfer');
-        header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename=' . basename($fileName));
-        header('Content-Transfer-Encoding: binary');
-        header('Expires: 0');
-        header('Cache-Control: must-revalidate');
-        header('Pragma: public');
-        header('Content-Length: ' . filesize($fileName));
+        if ('png' === $extension) {
+            header("Expires: $ts");
+            header("Pragma: cache");
+            header("Cache-Control: max-age=$seconds_to_cache");
+            header('Content-Type: image/png');
+        } elseif ('gif' === $extension) {
+            header("Expires: $ts");
+            header("Pragma: cache");
+            header("Cache-Control: max-age=$seconds_to_cache");
+            header('Content-Type: image/png');
+        } elseif ('jpg' === $extension || 'jpeg' === $extension) {
+            header("Expires: $ts");
+            header("Pragma: cache");
+            header("Cache-Control: max-age=$seconds_to_cache");
+            header('Content-Type: image/jpeg');
+        } elseif ('pdf' === $extension) {
+            header('Content-Type: application/pdf');
+        } elseif ('xml' === $extension) {
+            header('Content-Type: application/xml');
+        } else {
+            header('Content-Type: application/octet-stream');
+            header('Content-Transfer-Encoding: binary');
+            header('Expires: 0');
+            header('Cache-Control: must-revalidate');
+            header('Pragma: public');
+        }
+
+        header('Content-Disposition: attachment; filename=' . basename($file->filename));
+
+        header('Content-Length: ' . filesize(BaseService::getInstance()->getDataDirectory() . $file->filename));
         ob_clean();
         flush();
-        readfile($fileName);
+        readfile(BaseService::getInstance()->getDataDirectory() . $file->filename);
         exit;
 
     } else if ($action == 'rsp') { // linked clicked from password change email
@@ -305,13 +349,31 @@ try {// Domain aware input cleanup
             }
         }
     }
-    try {
-        echo BaseService::getInstance()->safeJsonEncode($ret);
-    } catch (Exception $e) {
-        LogManager::getInstance()->error($e->getMessage());
-        LogManager::getInstance()->notifyException($e);
-        echo json_encode(['status' => 'Error']);
+
+    if ($action == 'pdf') {
+        $data = $_REQUEST['data'];
+        $hash = $_REQUEST['h'];
+        PDFRegister::init();
+        $callback = PDFRegister::get($hash);
+        if (empty($callback) || !$callback($data)->granted()) {
+            $ret['status'] = "ERROR";
+            $ret['message'] = "Invalid request";
+        } else {
+            $pdfBuilder = $callback($data);
+            $pdf = $pdfBuilder->createPdf();
+            $pdf->SetAuthor(SettingsManager::getInstance()->getSetting('Company: Name'));
+            $pdf->Output();
+        }
+    } else {
+        try {
+            echo BaseService::getInstance()->safeJsonEncode($ret);
+        } catch (Exception $e) {
+            LogManager::getInstance()->error($e->getMessage());
+            LogManager::getInstance()->notifyException($e);
+            echo json_encode(['status' => 'Error']);
+        }
     }
+
 } catch (IceHttpException $e) {
     http_response_code($e->getCode());
     echo json_encode(['message' => $e->getMessage()]);

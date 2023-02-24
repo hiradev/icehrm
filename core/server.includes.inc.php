@@ -3,19 +3,27 @@
 use Classes\BaseService;
 use Classes\CustomFieldManager;
 use Classes\JwtTokenService;
+use Classes\MemoryCacheService;
 use Classes\Migration\MigrationManager;
 use Classes\NotificationManager;
+use Classes\RedisCacheService;
 use Classes\ReportHandler;
 use Classes\SettingsManager;
+use Model\Audit;
 use Model\BaseModel;
+use Model\DataEntryBackup;
+use Model\File;
+use Model\Notification;
+use Model\Report;
+use Model\RestAccessToken;
+use Model\Setting;
 use Utils\LogManager;
 
-if (!defined("AWS_REGION")) {
-    define('AWS_REGION', 'us-east-1');
-}
-include(APP_BASE_PATH.'lib/adodb512/adodb.inc.php');
-include(APP_BASE_PATH.'lib/adodb512/adodb-active-record.inc.php');
-$ADODB_ASSOC_CASE = 2;
+//include(APP_BASE_PATH.'lib/adodb512/adodb.inc.php');
+//include(APP_BASE_PATH.'lib/adodb512/adodb-active-record.inc.php');
+//$ADODB_ASSOC_CASE = 2;
+
+include(APP_BASE_PATH.'lib/fpdf/fpdf.php');
 
 //detect admin and user modules
 if (defined("MODULE_PATH")) {
@@ -32,19 +40,21 @@ if (defined("MODULE_PATH")) {
     }
 }
 
-$user = \Utils\SessionUtils::getSessionObject('user');
+//$dbLocal = NewADOConnection('mysqli');
+//$res = $dbLocal->Connect(APP_HOST, APP_USERNAME, APP_PASSWORD, APP_DB);
 
-$dbLocal = NewADOConnection('mysqli');
+$dbLocal = new \MyORM\MySqlActiveRecord();
 $res = $dbLocal->Connect(APP_HOST, APP_USERNAME, APP_PASSWORD, APP_DB);
 
+//File::SetDatabaseAdapter($dbLocal);
+//Setting::SetDatabaseAdapter($dbLocal);
+//Report::SetDatabaseAdapter($dbLocal);
+//DataEntryBackup::SetDatabaseAdapter($dbLocal);
+//Audit::SetDatabaseAdapter($dbLocal);
+//Notification::SetDatabaseAdapter($dbLocal);
+//RestAccessToken::SetDatabaseAdapter($dbLocal);
 
-\Model\File::SetDatabaseAdapter($dbLocal);
-\Model\Setting::SetDatabaseAdapter($dbLocal);
-\Model\Report::SetDatabaseAdapter($dbLocal);
-\Model\DataEntryBackup::SetDatabaseAdapter($dbLocal);
-\Model\Audit::SetDatabaseAdapter($dbLocal);
-\Model\Notification::SetDatabaseAdapter($dbLocal);
-\Model\RestAccessToken::SetDatabaseAdapter($dbLocal);
+$user = \Utils\SessionUtils::getSessionObject('user');
 
 
 $baseService = BaseService::getInstance();
@@ -72,12 +82,17 @@ if (defined('REDIS_SERVER_URI')
     && QUERY_CACHE_TYPE === 'redis'
 ) {
     BaseService::getInstance()->setCacheService(
-        new \Classes\RedisCacheService(REDIS_SERVER_URI, CLIENT_NAME)
+        new RedisCacheService(REDIS_SERVER_URI, CLIENT_NAME)
     );
 } else {
     BaseService::getInstance()->setCacheService(
-        new \Classes\MemoryCacheService(CLIENT_NAME)
+        new MemoryCacheService(CLIENT_NAME)
     );
+}
+
+$awsRegion = SettingsManager::getInstance()->getSetting("System: AWS Region");
+if (!defined("AWS_REGION")) {
+    define('AWS_REGION', empty($awsRegion) ? 'us-east-1' : $awsRegion);
 }
 
 $samlEnabled = SettingsManager::getInstance()->getSetting("SAML: Enabled");
@@ -139,7 +154,7 @@ if (defined('CLIENT_PATH')) {
         /** @var BaseModel $modelClass */
         foreach ($modelClassList as $modelClass) {
             $modelClassWithNameSpace = $metaData['model_namespace']."\\".$modelClass;
-            $modelClassWithNameSpace::SetDatabaseAdapter($dbLocal);
+            //$modelClassWithNameSpace::SetDatabaseAdapter($dbLocal);
             $baseService->addModelClass($modelClass, $modelClassWithNameSpace);
             $modelClassObject = new $modelClassWithNameSpace();
         }
@@ -192,6 +207,7 @@ function shutdown()
     $error = error_get_last();
 
     if (!empty($error) && isset($error['type']) && in_array($error['type'], [E_ERROR, E_PARSE])) {
+        LogManager::getInstance()->error(json_encode($error));
         LogManager::getInstance()->notifyException(new ErrorException(
             $error['message'],
             0,

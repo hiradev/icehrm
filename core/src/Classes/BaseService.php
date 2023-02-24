@@ -13,6 +13,7 @@ namespace Classes;
 use Classes\Crypt\AesCtr;
 use Classes\Email\EmailSender;
 use Classes\Exception\IceHttpException;
+use Classes\Migration\MigrationInterface;
 use Company\Common\Model\CompanyStructure;
 use Employees\Common\Model\Employee;
 use Employees\Common\Model\EmployeeApproval;
@@ -22,6 +23,7 @@ use Metadata\Common\Model\CalculationHook;
 use Model\BaseModel;
 use Model\DataEntryBackup;
 use Model\Setting;
+use Model\SystemData;
 use Modules\Common\Model\Module;
 use Permissions\Common\Model\Permission;
 use Users\Common\Model\User;
@@ -57,6 +59,7 @@ class BaseService
     public $currentProfileId = false;
 
     protected $cacheService = null;
+    protected $extensionMigrations = [];
 
     protected $pro = null;
 
@@ -68,6 +71,7 @@ class BaseService
 
     /**
      * Get the only instance created for BaseService
+     *
      * @method getInstance
      * @return {BaseService} BaseService object
      */
@@ -83,19 +87,35 @@ class BaseService
 
     /**
      * Get an array of objects from database
+     *
      * @method get
-     * @param $table {String} model class name of the table to retive data
+     * @param  $table {String} model class name of the table to retive data
      * (e.g for Users table model class name is User)
-     * @param $mappingStr {String} a JSON string to specify fields of the $table should be mapped
-     * to other tables (e.g {"profile":["Profile","id","first_name+last_name"]} : this is how the
-     * profile field in Users table is mapped to Profile table. In this case users profile field
-     * will get filled by Profile first name and last name. The original value in User->profile
-     * field will get moved to User->profile_id)
-     * @param $filterStr {String} a JSON string to specify the ordering of the items
+     * @param  mappingStr {String} a JSON string to specify fields of the            $table should be mapped
+     *                                                                                     to other tables
+     *                                                                                     (e.g
+     *                                                                                     {"profile":["Profile","id","first_name+last_name"]}
+     *                                                                                     : this is how the
+     *                                                                                     profile field in
+     *                                                                                     Users table is
+     *                                                                                     mapped to Profile
+     *                                                                                     table. In this
+     *                                                                                     case users
+     *                                                                                     profile field
+     *                                                                                     will get filled
+     *                                                                                     by Profile first
+     *                                                                                     name and last
+     *                                                                                     name. The
+     *                                                                                     original value in
+     *                                                                                     User->profile
+     *                                                                                     field will get
+     *                                                                                     moved to
+     *                                                                                     User->profile_id)
+     * @param  $filterStr {String} a JSON string to specify the ordering of the items
      * (e.g {"job_title":"2","department":"2"}  - this will select only items having
      * job_title = 2 and department = 2)
-     * @param $orderBy {String} a string to specify the ordering (e.g in_time desc)
-     * @param string $limit {String} a string to specify the limit (e.g limit 2)
+     * @param  $orderBy {String} a string to specify the ordering (e.g in_time desc)
+     * @param  string                                                                $limit {String} a string to specify the limit (e.g limit 2)
      * @return {Array} an array of objects of type $table
      */
     public function get($table, $mappingStr = null, $filterStr = null, $orderBy = null, $limit = null)
@@ -133,18 +153,26 @@ class BaseService
             $orderBy = " ORDER BY ".$orderBy;
         }
 
+        if ($obj->getFinder() !== null) {
+            $finder = $obj->getFinder();
+        } else {
+            $finder = $obj;
+        }
         if (in_array($table, $this->userTables)) {
             $cemp = $this->getCurrentProfileId();
             if (!empty($cemp)) {
                 $signInMappingField = SIGN_IN_ELEMENT_MAPPING_FIELD_NAME;
-                $list = $obj->Find($signInMappingField." = ?".$query.$orderBy, array_merge(array($cemp), $queryData));
+                $list = $finder->Find(
+                    $signInMappingField." = ?".$query.$orderBy,
+                    array_merge(array($cemp), $queryData)
+                );
             } else {
                 $list = array();
             }
         } else {
             LogManager::getInstance()->debug("Query: "."1=1".$query.$orderBy);
             LogManager::getInstance()->debug("Query Data: ".print_r($queryData, true));
-            $list = $obj->Find("1=1".$query.$orderBy, $queryData);
+            $list = $finder->Find("1=1".$query.$orderBy, $queryData);
         }
 
         $newList = array();
@@ -152,7 +180,7 @@ class BaseService
             $newList[] = $this->cleanUpAdoDB($listObj);
         }
 
-        if (!empty($mappingStr) && count($map)>0) {
+        if (!empty($mappingStr) && is_object($map)) {
             $list = $this->populateMapping($newList, $map);
         }
 
@@ -240,13 +268,17 @@ class BaseService
     public function getSortingData($req)
     {
         $data = array();
-        $data['sorting'] = $req['sorting'];
+        $data['sorting'] = isset($req['sorting']) ? $req['sorting'] : '' ;
 
         $columns = json_decode($req['cl'], true);
 
-        $data['column'] = $columns[$req['iSortCol_0']];
+        if (isset($req['iSortCol_0']) && isset($columns[$req['iSortCol_0']])) {
+            $data['column'] = $columns[$req['iSortCol_0']];
+        }
 
-        $data['order'] = $req['sSortDir_0'];
+        if (isset($req['sSortDir_0'])) {
+            $data['order'] = $req['sSortDir_0'];
+        }
 
         return $data;
     }
@@ -277,10 +309,11 @@ class BaseService
 
 
             if (in_array($table, BaseService::getInstance()->userTables)
-                && !$skipProfileRestriction && !$isSubOrdinates) {
+                && !$skipProfileRestriction && !$isSubOrdinates
+            ) {
                 $cemp = BaseService::getInstance()->getCurrentProfileId();
                 $sql = "Select count(id) as count from "
-                    . $obj->_table . " where " . SIGN_IN_ELEMENT_MAPPING_FIELD_NAME . " = ? " . $countFilterQuery;
+                    . $obj->table . " where " . SIGN_IN_ELEMENT_MAPPING_FIELD_NAME . " = ? " . $countFilterQuery;
                 array_unshift($countFilterQueryData, $cemp);
 
                 $rowCount = $obj->DB()->Execute($sql, $countFilterQueryData);
@@ -354,12 +387,17 @@ class BaseService
                             }
                         }
                     }
-                    $sql = "Select count(id) as count from " . $obj->_table .
-                        " where " . $obj->getUserOnlyMeAccessField() . " in (" . $subordinatesIds . ") "
-                        . $countFilterQuery;
+                    if (!empty($subordinatesIds)) {
+                        $sql = "Select count(id) as count from " . $obj->table .
+                            " where " . $obj->getUserOnlyMeAccessField() . " in (" . $subordinatesIds . ") "
+                            . $countFilterQuery;
+                    } else {
+                        $sql = "Select count(id) as count from " . $obj->table . " where 1 = 1 " . $countFilterQuery;
+                    }
+
                     $rowCount = $obj->DB()->Execute($sql, $countFilterQueryData);
                 } else {
-                    $sql = "Select count(id) as count from " . $obj->_table;
+                    $sql = "Select count(id) as count from " . $obj->table;
                     if (!empty($countFilterQuery)) {
                         $sql .= " where 1=1 " . $countFilterQuery;
                     }
@@ -379,28 +417,76 @@ class BaseService
 
     /**
      * An extention of get method for the use of data tables with ability to search
+     *
      * @method getData
-     * @param $table {String} model class name of the table to retive data
+     * @param  $table {String} model class name of the table to retive data
      * (e.g for Users table model class name is User)
-     * @param $mappingStr {String} a JSON string to specify fields of the $table should
-     * be mapped to other tables (e.g {"profile":["Profile","id","first_name+last_name"]}
-     * : this is how the profile field in Users table is mapped to Profile table.
-     * In this case users profile field will get filled by Profile first name and last name.
-     * The original value in User->profile field will get moved to User->profile_id)
-     * @param $filterStr {String} a JSON string to specify the ordering of the items
+     * @param  mappingStr {String} a JSON string to specify fields of the            $table                  should
+     *                                                                                                       be
+     *                                                                                                       mapped
+     *                                                                                                       to
+     *                                                                                                       other
+     *                                                                                                       tables
+     *                                                                                                       (e.g
+     *                                                                                                       {"profile":["Profile","id","first_name+last_name"]}
+     *                                                                                                       : this
+     *                                                                                                       is how
+     *                                                                                                       the
+     *                                                                                                       profile
+     *                                                                                                       field
+     *                                                                                                       in
+     *                                                                                                       Users
+     *                                                                                                       table
+     *                                                                                                       is
+     *                                                                                                       mapped
+     *                                                                                                       to
+     *                                                                                                       Profile
+     *                                                                                                       table.
+     *                                                                                                       In
+     *                                                                                                       this
+     *                                                                                                       case
+     *                                                                                                       users
+     *                                                                                                       profile
+     *                                                                                                       field
+     *                                                                                                       will
+     *                                                                                                       get
+     *                                                                                                       filled
+     *                                                                                                       by
+     *                                                                                                       Profile
+     *                                                                                                       first
+     *                                                                                                       name
+     *                                                                                                       and
+     *                                                                                                       last
+     *                                                                                                       name.
+     *                                                                                                       The
+     *                                                                                                       original
+     *                                                                                                       value
+     *                                                                                                       in
+     *                                                                                                       User->profile
+     *                                                                                                       field
+     *                                                                                                       will
+     *                                                                                                       get
+     *                                                                                                       moved
+     *                                                                                                       to
+     *                                                                                                       User->profile_id)
+     * @param  $filterStr {String} a JSON string to specify the ordering of the items
      * (e.g {"job_title":"2","department":"2"}  - this will select only items having
      * job_title = 2 and department = 2)
-     * @param $orderBy {String} a string to specify the ordering (e.g in_time desc)
-     * @param string $limit {String} a string to specify the limit (e.g limit 2)
-     * @param string $searchColumns {String} a JSON string to specify names of searchable
-     * fields (e.g ["id","employee_id","first_name","last_name","mobile_phone","department","gender","supervisor"])
-     * @param string $searchTerm {String} a string to specify term to search
-     * @param string $isSubOrdinates {Boolean} a Boolean to specify if we only need to retive
-     * subordinates. Any item is a subordinate item if the item has "profile" field defined
-     * and the value of "profile" field is equal to id of one of the subordinates of currenly
-     * logged in profile id. (Any Profile is a subordinate of curently logged in Profile if the
-     * supervisor field of a Profile is set to the id of currently logged in Profile)
-     * @param string $skipProfileRestriction {Boolean} default if false - TODO - I'll explain this later
+     * @param  $orderBy {String} a string to specify the ordering (e.g in_time desc)
+     * @param  string                                                                $limit                  {String} a string to specify the limit (e.g limit 2)
+     * @param  string                                                                $searchColumns          {String} a JSON string to specify names of searchable
+     *                                                                                                       fields (e.g
+     *                                                                                                       ["id","employee_id","first_name","last_name","mobile_phone","department","gender","supervisor"])
+     * @param  string                                                                $searchTerm             {String} a string to specify term to search
+     * @param  string                                                                $isSubOrdinates         {Boolean} a Boolean to specify if we only need to retive
+     *                                                                                                       subordinates. Any item is a subordinate item if the item
+     *                                                                                                       has "profile" field defined and the value of "profile"
+     *                                                                                                       field is equal to id of one of the subordinates of
+     *                                                                                                       currenly logged in profile id. (Any Profile is a
+     *                                                                                                       subordinate of curently logged in Profile if the
+     *                                                                                                       supervisor field of a Profile is set to the id of
+     *                                                                                                       currently logged in Profile)
+     * @param  string                                                                $skipProfileRestriction {Boolean} default if false - TODO - I'll explain this later
      * @return {Array} an array of objects of type $table
      */
     public function getData(
@@ -415,10 +501,12 @@ class BaseService
         $skipProfileRestriction = false,
         $sortData = array()
     ) {
+        $map = [];
         if (!empty($mappingStr)) {
             $map = json_decode($mappingStr);
         }
         $nsTable = $this->getFullQualifiedModelClassName($table);
+        /** @var BaseModel $obj */
         $obj = new $nsTable();
         $this->checkSecureAccess("get", $obj, $table, $_REQUEST);
         $query = "";
@@ -444,9 +532,11 @@ class BaseService
             LogManager::getInstance()->debug("Filter Query Data:".json_encode($queryData));
         }
 
+        $searchJoinQuery = "";
+
         if (!empty($searchTerm) && !empty($searchColumns)) {
             $searchColumnList = json_decode($searchColumns);
-            $searchColumnList = array_diff($searchColumnList, $obj->getVirtualFields());
+            $searchColumnList = array_intersect($searchColumnList, $obj->getColumns());
             if (!empty($searchColumnList)) {
                 $tempQuery = " and (";
                 foreach ($searchColumnList as $col) {
@@ -456,6 +546,15 @@ class BaseService
                     $tempQuery.=$col." like ?";
                     $queryData[] = "%".$searchTerm."%";
                 }
+
+                if (!empty($map->employee) && 'Employee' != $table) {
+                    $tempQuery.=" or emp.first_name like ? or emp.last_name like ?";
+                    $queryData[] = "%".$searchTerm."%";
+                    $queryData[] = "%".$searchTerm."%";
+
+                    $searchJoinQuery = ' LEFT JOIN Employees emp ON emp.id = a.employee WHERE ';
+                }
+
                 $query.= $tempQuery.")";
             }
         }
@@ -474,6 +573,20 @@ class BaseService
             $limit = "";
         }
 
+        if ($obj->getFinder() !== null) {
+            /**
+ * @var FinderProxy $finder
+*/
+            $finder = $obj->getFinder();
+        } else {
+            /**
+ * @var FinderProxy $finder
+*/
+            $finder = $obj;
+        }
+
+        $finder->setIsSubOrdinateQuery($isSubOrdinates);
+
         if (in_array($table, $this->userTables) && !$skipProfileRestriction) {
             $cemp = $this->getCurrentProfileId();
             if (!empty($cemp)) {
@@ -482,10 +595,16 @@ class BaseService
                     //$signInMappingField = SIGN_IN_ELEMENT_MAPPING_FIELD_NAME;
                     $signInMappingField = $obj->getUserOnlyMeAccessField();
                     LogManager::getInstance()->debug(
-                        "Data Load Query (x1):"."1=1".$signInMappingField." = ?".$query.$orderBy.$limit
+                        "Data Load Query (x1):".$signInMappingField." = ?".$query.$orderBy.$limit
                     );
                     LogManager::getInstance()->debug("Data Load Query Data (x1):".json_encode($queryData));
-                    $list = $obj->Find($signInMappingField." = ?".$query.$orderBy.$limit, $queryData);
+                    $list = $finder->Find(
+                        $searchJoinQuery.
+                        $signInMappingField
+                        ." = ?".
+                        $query.$orderBy.$limit,
+                        $queryData
+                    );
                 } else {
                     $profileClass = $this->getFullQualifiedModelClassName(ucfirst(SIGN_IN_ELEMENT_MAPPING_FIELD_NAME));
                     $subordinate = new $profileClass();
@@ -493,9 +612,10 @@ class BaseService
                     $cempObj = new Employee();
                     $cempObj->Load("id = ?", array($cemp));
 
-                    if ($obj->getUserOnlyMeAccessField() == 'id' &&
-                        SettingsManager::getInstance()->getSetting('System: Company Structure Managers Enabled') == 1 &&
-                        CompanyStructure::isHeadOfCompanyStructure($cempObj->department, $cemp)) {
+                    if ($obj->getUserOnlyMeAccessField() == 'id'
+                        && SettingsManager::getInstance()->getSetting('System: Company Structure Managers Enabled') == 1
+                        && CompanyStructure::isHeadOfCompanyStructure($cempObj->department, $cemp)
+                    ) {
                         if (empty($subordinates)) {
                             $subordinates = array();
                         }
@@ -550,12 +670,13 @@ class BaseService
 
                     $signInMappingField = $obj->getUserOnlyMeAccessField();
                     LogManager::getInstance()->debug(
-                        "Data Load Query (x2):"."1=1".$signInMappingField." in (".$subordinatesIds.") "
+                        "Data Load Query (x2):".$signInMappingField." in (".$subordinatesIds.") "
                         .$query.$orderBy.$limit
                     );
                     LogManager::getInstance()->debug("Data Load Query Data (x2):".json_encode($queryData));
                     if (!empty($subordinatesIds)) {
-                        $list = $obj->Find(
+                        $list = $finder->Find(
+                            $searchJoinQuery.
                             $signInMappingField . " in (" . $subordinatesIds . ") " . $query . $orderBy . $limit,
                             $queryData
                         );
@@ -574,9 +695,10 @@ class BaseService
                 $subordinates = $subordinate->Find("supervisor = ?", array($cemp));
                 $cempObj = new Employee();
                 $cempObj->Load("id = ?", array($cemp));
-                if ($obj->getUserOnlyMeAccessField() == 'id' &&
-                    SettingsManager::getInstance()->getSetting('System: Company Structure Managers Enabled') == 1 &&
-                    CompanyStructure::isHeadOfCompanyStructure($cempObj->department, $cemp)) {
+                if ($obj->getUserOnlyMeAccessField() == 'id'
+                    && SettingsManager::getInstance()->getSetting('System: Company Structure Managers Enabled') == 1
+                    && CompanyStructure::isHeadOfCompanyStructure($cempObj->department, $cemp)
+                ) {
                     if (empty($subordinates)) {
                         $subordinates = array();
                     }
@@ -633,22 +755,30 @@ class BaseService
                 LogManager::getInstance()->debug(
                     "Data Load Query (a1):".$signInMappingField." in (".$subordinatesIds.") ".$query.$orderBy.$limit
                 );
-                $list = $obj->Find(
-                    $signInMappingField." in (".$subordinatesIds.") ".$query.$orderBy.$limit,
-                    $queryData
-                );
+                if (!empty($subordinatesIds)) {
+                    $list = $finder->Find(
+                        $searchJoinQuery.
+                        $signInMappingField." in (".$subordinatesIds.") ".$query.$orderBy.$limit,
+                        $queryData
+                    );
+                } else {
+                    $list = $finder->Find(
+                        $searchJoinQuery.$query.$orderBy.$limit,
+                        $queryData
+                    );
+                }
             } else {
-                $list = $obj->Find("1=1".$query.$orderBy.$limit, $queryData);
+                $list = $finder->Find($searchJoinQuery.$query.$orderBy.$limit, $queryData);
             }
         } else {
-            $list = $obj->Find("1=1".$query.$orderBy.$limit, $queryData);
+            $list = $finder->Find($searchJoinQuery.$query.$orderBy.$limit, $queryData);
         }
 
         if (!$list) {
             LogManager::getInstance()->debug("Get Data Error:".$obj->ErrorMsg());
         }
 
-        LogManager::getInstance()->debug("Data Load Query:"."1=1".$query.$orderBy.$limit);
+        LogManager::getInstance()->debug("Data Load Query:".$query.$orderBy.$limit);
         LogManager::getInstance()->debug("Data Load Query Data:".json_encode($queryData));
 
         $processedList = array();
@@ -661,7 +791,7 @@ class BaseService
 
         $list = $processedList;
 
-        if (!empty($mappingStr) && count($map)>0) {
+        if (!empty($mappingStr) && is_object($map)) {
             $list = $this->populateMapping($list, $map);
         }
 
@@ -670,9 +800,10 @@ class BaseService
 
     /**
      * Propulate field mappings for a given set of objects
+     *
      * @method populateMapping
-     * @param $list {Array} array of model objects
-     * @param $map {Array} an associative array of Mappings (e.g {"profile":["Profile","id","first_name+last_name"]})
+     * @param  $list {Array} array of model objects
+     * @param  $map {Array} an associative array of Mappings (e.g {"profile":["Profile","id","first_name+last_name"]})
      * @return {Array} array of populated objects
      */
 
@@ -692,11 +823,15 @@ class BaseService
     public function populateMappingItem($item, $map)
     {
         foreach ($map as $k => $v) {
+            if (!isset($item->$k)) {
+                continue;
+            }
+
             $fTable = $this->getFullQualifiedModelClassName($v[0]);
             $tObj = new $fTable();
             $tObj = $tObj->Find($v[1]."= ?", array($item->$k));
 
-            if (is_array($tObj)) {
+            if (is_array($tObj) && !empty($tObj)) {
                 $tObj = $tObj[0];
             } else {
                 continue;
@@ -728,14 +863,24 @@ class BaseService
 
     /**
      * Retive one element from db
+     *
      * @method getElement
-     * @param $table {String} model class name of the table to get data (e.g for Users table model class name is User)
-     * @param $table {Integer} id of the item to get from $table
-     * @param $mappingStr {String} a JSON string to specify fields of the $table should be mapped to other
-     * tables (e.g {"profile":["Profile","id","first_name+last_name"]} : this is how the profile field in
-     * Users table is mapped to Profile table. In this case users profile field will get filled by Profile
-     * first name and last name. The original value in User->profile field will get moved to User->profile_id)
-     * @param $skipSecurityCheck {Boolean} if true won't check whether the user has access to that object
+     * @param  $table {String} model class name of the table to get data (e.g for Users table model class name is User)
+     * @param  table {Integer} id of the item to get from                                                 $table
+     * @param  mappingStr {String} a JSON string to specify fields of the                                 $table should be mapped to other
+     *                                                                                                          tables (e.g
+     *                                                                                                          {"profile":["Profile","id","first_name+last_name"]}
+     *                                                                                                          : this is how the profile
+     *                                                                                                          field in Users table is
+     *                                                                                                          mapped to Profile table.
+     *                                                                                                          In this case users profile
+     *                                                                                                          field will get filled by
+     *                                                                                                          Profile first name and
+     *                                                                                                          last name. The original
+     *                                                                                                          value in User->profile
+     *                                                                                                          field will get moved to
+     *                                                                                                          User->profile_id)
+     * @param  $skipSecurityCheck {Boolean} if true won't check whether the user has access to that object
      * @return {Object} an object of type $table
      */
 
@@ -801,11 +946,12 @@ class BaseService
 
     /**
      * Add an element to a given table
+     *
      * @method addElement
-     * @param $table {String} model class name of the table to add data (e.g for Users table model class name is User)
-     * @param $obj {Array} an associative array with field names and values for the new object.
+     * @param  $table {String} model class name of the table to add data (e.g for Users table model class name is User)
+     * @param  $obj {Array} an associative array with field names and values for the new object.
      * If the object id is not empty an existing object will be updated
-     * @param null $postObject
+     * @param  null                                                                            $postObject
      * @return IceResponse {Object} newly added or updated element of type $table newly added or updated
      * element of type $table
      */
@@ -820,7 +966,8 @@ class BaseService
 
 
         if ($ele->validateCSRF()
-            && (empty($obj->csrf) || $obj->csrf !== SessionUtils::getSessionObject('csrf-'.$table))) {
+            && (empty($obj->csrf) || $obj->csrf !== SessionUtils::getSessionObject('csrf-'.$table))
+        ) {
             return new IceResponse(
                 IceResponse::ERROR,
                 "CSRF Error"
@@ -891,10 +1038,16 @@ class BaseService
             $ele->updated = date("Y-m-d H:i:s");
         }
         if ($isAdd) {
-            $ele = $ele->executePreSaveActions($ele)->getData();
+            $preResponse = $ele->executePreSaveActions($ele);
         } else {
-            $ele = $ele->executePreUpdateActions($ele)->getData();
+            $preResponse = $ele->executePreUpdateActions($ele);
         }
+
+        if ($preResponse->getStatus() === IceResponse::ERROR) {
+            return $preResponse;
+        }
+
+        $ele = $preResponse->getData();
 
         $ok = $ele->Save();
 
@@ -937,22 +1090,25 @@ class BaseService
 
     /**
      * Delete an element if not the $table and $id is defined as a non deletable
+     *
      * @method deleteElement
-     * @param $table {String} model class name of the table to delete data
+     * @param  $table {String} model class name of the table to delete data
      * (e.g for Users table model class name is User)
-     * @param $id {Integer} id of the item to delete
+     * @param  $id {Integer} id of the item to delete
      * @return NULL
      */
     public function deleteElement($table, $id)
     {
         $fileFields = $this->fileFields;
         $nsTable = $this->getFullQualifiedModelClassName($table);
-        /** @var BaseModel $ele */
+        /**
+ * @var BaseModel $ele
+*/
         $ele = new $nsTable();
 
         $ele->Load('id = ?', array($id));
 
-        if (empty($ele->id) || $ele->id !== $id) {
+        if (empty($ele->id) || $ele->id !== intval($id)) {
             return new IceResponse(
                 IceResponse::ERROR,
                 "Item not found"
@@ -1018,7 +1174,9 @@ class BaseService
         }
 
         $cfs = $this->customFieldManager->getCustomFields($table, $id);
-        /** @var CustomField $cf */
+        /**
+ * @var CustomField $cf
+*/
         foreach ($cfs as $cf) {
             $cf->Delete();
         }
@@ -1033,11 +1191,12 @@ class BaseService
      * Get associative array of by retriving data from $table using $key field ans key and
      * $value field as value. Mainly used for getting data for populating option lists of select
      * boxes when adding and editing items
+     *
      * @method getFieldValues
-     * @param $table {String} model class name of the table to get data (e.g for Users table model class name is User)
-     * @param $key {String} key field name
-     * @param $value {String} value field name (multiple fileds cam be concatinated using +) - e.g first_name+last_name
-     * @param $method {String} if not empty, use this menthod to get only a selected set of objects
+     * @param  $table {String} model class name of the table to get data (e.g for Users table model class name is User)
+     * @param  $key {String} key field name
+     * @param  $value {String} value field name (multiple fileds cam be concatinated using +) - e.g first_name+last_name
+     * @param  $method {String} if not empty, use this menthod to get only a selected set of objects
      * from db instead of retriving all objects. This method should be defined in class $table
      * and should return an array of objects of type $table
      * @return {Array} associative array
@@ -1051,6 +1210,12 @@ class BaseService
         $ret = array();
         $nsTable = $this->getFullQualifiedModelClassName($table);
         $ele = new $nsTable();
+
+        $finder = $ele->getFieldMappingFinder();
+        if ($finder !== null) {
+            $ele = $finder;
+        }
+
         $this->checkSecureAccess("get", $ele, $table, $_POST);
         if (!empty($method)) {
             if (method_exists($ele, $method) && in_array($method, $ele->fieldValueMethods())) {
@@ -1070,7 +1235,7 @@ class BaseService
         foreach ($list as $obj) {
             $obj = $this->cleanUpAdoDB($obj);
             if (count($values) == 1) {
-                $ret[$obj->$key] = $obj->$value;
+                $ret[(string)$obj->$key] = $obj->$value;
             } else {
                 $objVal = "";
                 foreach ($values as $v) {
@@ -1079,7 +1244,7 @@ class BaseService
                     }
                     $objVal .= $obj->$v;
                 }
-                $ret[$obj->$key] = $objVal;
+                $ret[(string)$obj->$key] = $objVal;
             }
         }
         return $ret;
@@ -1105,8 +1270,9 @@ class BaseService
 
     /**
      * Set the current logged in user
+     *
      * @method setCurrentUser
-     * @param $currentUser {User} the current logged in user
+     * @param  $currentUser {User} the current logged in user
      */
 
     public function setCurrentUser($currentUser)
@@ -1133,6 +1299,7 @@ class BaseService
 
     /**
      * Get the currently logged in user from session
+     *
      * @method getCurrentUser
      * @return {User} currently logged in user from session
      */
@@ -1149,6 +1316,7 @@ class BaseService
     /**
      * Get the Profile id attached to currently logged in user. if the user is switched,
      * this will return the id of switched Profile instead of currently logged in users Prifile id
+     *
      * @method getCurrentProfileId
      * @return {Integer}
      */
@@ -1166,8 +1334,25 @@ class BaseService
         return $adminEmpId;
     }
 
+    public function getCurrentSwitchedEmployeeUserId()
+    {
+        $signInMappingField = SIGN_IN_ELEMENT_MAPPING_FIELD_NAME;
+        $adminEmpId = SessionUtils::getSessionObject('admin_current_profile');
+        if (!empty($adminEmpId)) {
+            $user = new User();
+            $user->Load($signInMappingField.' = ?', [$adminEmpId]);
+            if (empty($user->id)) {
+                return null;
+            }
+        }
+        $user = SessionUtils::getSessionObject('user');
+
+        return $user->$signInMappingField;
+    }
+
     /**
      * Get the Profile id attached to currently logged in user
+     *
      * @method getCurrentProfileId
      * @return {Integer}
      */
@@ -1180,6 +1365,7 @@ class BaseService
 
     /**
      * Check if the current user has switched into another user
+     *
      * @method isEmployeeSwitched
      * @return {Boolean}
      */
@@ -1191,8 +1377,9 @@ class BaseService
 
     /**
      * Get User by profile id
+     *
      * @method getUserFromProfileId
-     * @param $profileId {Integer} profile id
+     * @param  $profileId {Integer} profile id
      * @return {User} user object
      */
 
@@ -1228,14 +1415,6 @@ class BaseService
     public function cleanUpAdoDB($obj)
     {
         unset($obj->table);
-        unset($obj->_table);
-        unset($obj->_dbat);
-        unset($obj->_tableat);
-        unset($obj->_where);
-        unset($obj->_saved);
-        unset($obj->_lasterr);
-        unset($obj->_original);
-        unset($obj->foreignName);
 
         return $obj;
     }
@@ -1291,11 +1470,12 @@ class BaseService
     /**
      * Use user level security functions defined in model classes to check whether a given action
      * type is allowed to be executed by the current user on a given object
+     *
      * @method checkSecureAccess
-     * @param $type {String} Action type
-     * @param $object {Object} object to test access
-     * @param $table
-     * @param $request
+     * @param  $type {String} Action type
+     * @param  $object {Object} object to test access
+     * @param  $table
+     * @param  $request
      * @return bool {Boolen} true or exit true or exit
      */
 
@@ -1320,9 +1500,10 @@ class BaseService
 
             //This will check whether user can access his own records using a value in request
             if (isset($request[$userOnlyMeAccessField])
-                && isset($this->currentUser->$userOnlyMeAccessField)) {
-                if (in_array($type, $accessMatrix) && $request[$userOnlyMeAccessField]
-                    === $this->currentUser->$userOnlyMeAccessRequestField) {
+                && isset($this->currentUser->$userOnlyMeAccessField)
+            ) {
+                if (in_array($type, $accessMatrix) && (string)$request[$userOnlyMeAccessField]=== (string)$this->currentUser->$userOnlyMeAccessRequestField
+                ) {
                     return true;
                 }
             }
@@ -1331,7 +1512,8 @@ class BaseService
             // Employees should be able to update their own records
             if (!empty($table) && in_array($type, $accessMatrix)) {
                 if (!empty($this->currentUser->$userOnlyMeAccessRequestField)
-                    && in_array($table, $this->userTables)) {
+                    && in_array($table, $this->userTables)
+                ) {
                     return true;
                 }
             }
@@ -1401,19 +1583,19 @@ class BaseService
             return true;
         }
 
-//        $data = AesCtr::decrypt($key, $instanceId, 256);
-//        $arr = explode("|", $data);
-//        if ($arr[0] == KEY_PREFIX && $arr[1] == $instanceId) {
-//            return true;
-//        }
+        //        $data = AesCtr::decrypt($key, $instanceId, 256);
+        //        $arr = explode("|", $data);
+        //        if ($arr[0] == KEY_PREFIX && $arr[1] == $instanceId) {
+        //            return true;
+        //        }
 
         return false;
     }
 
-    public function loadModulePermissions($group, $name, $userLevel)
+    public function loadModulePermissions($updatePath, $userLevel)
     {
         $module = new Module();
-        $module->Load("update_path = ?", array($group.">".$name));
+        $module->Load("update_path = ?", array($updatePath));
 
         $arr = array();
         $arr['user'] = json_decode($module->user_levels, true);
@@ -1444,8 +1626,7 @@ class BaseService
         //Check if user has permissions to this module
         //Check Module Permissions
         $modulePermissions = BaseService::getInstance()->loadModulePermissions(
-            $moduleManagerObj->getModuleType(),
-            $moduleObject['name'],
+            $moduleManagerObj->getUpdatePath(),
             BaseService::getInstance()->getCurrentUser()->user_level
         );
 
@@ -1476,8 +1657,7 @@ class BaseService
         //Check if user has permissions to this module
         //Check Module Permissions
         $modulePermissions = BaseService::getInstance()->loadModulePermissions(
-            $moduleManagerObj->getModuleType(),
-            $moduleObject['name'],
+            $moduleManagerObj->getUpdatePath(),
             $user->user_level
         );
 
@@ -1513,8 +1693,9 @@ class BaseService
 
     /**
      * Set the audit manager
+     *
      * @method setAuditManager
-     * @param $auditManager {AuditManager}
+     * @param  $auditManager {AuditManager}
      */
 
     public function setAuditManager($auditManager)
@@ -1524,8 +1705,9 @@ class BaseService
 
     /**
      * Set the NotificationManager
+     *
      * @method setNotificationManager
-     * @param $notificationManager {NotificationManager}
+     * @param  $notificationManager {NotificationManager}
      */
 
     public function setNotificationManager($notificationManager)
@@ -1535,8 +1717,9 @@ class BaseService
 
     /**
      * Set the SettingsManager
+     *
      * @method setSettingsManager
-     * @param $settingsManager {SettingsManager}
+     * @param  $settingsManager {SettingsManager}
      */
 
     public function setSettingsManager($settingsManager)
@@ -1626,14 +1809,35 @@ class BaseService
         return $admins;
     }
 
+    public function getUserTimeZone($user)
+    {
+        if (empty($user->employee)) {
+            return null;
+        }
+
+        $emp = new Employee();
+        $emp->Load("id = ?", [$user->employee]);
+        if (empty($emp->id) || empty($emp->department)) {
+            return null;
+        }
+
+        return $this->getEmployeeTimeZone($emp->id);
+    }
+
     public function getCurrentEmployeeTimeZone()
     {
         $cemp = $this->getCurrentProfileId();
         if (empty($cemp)) {
             return null;
         }
+
+        return $this->getEmployeeTimeZone($cemp);
+    }
+
+    public function getEmployeeTimeZone($employeeId)
+    {
         $emp = new Employee();
-        $emp->Load("id = ?", array($cemp));
+        $emp->Load("id = ?", array($employeeId));
         if (empty($emp->id) || empty($emp->department)) {
             return null;
         }
@@ -1835,8 +2039,8 @@ END;
 
     /**
      * @param $value
-     * @param int $options
-     * @param int $depth
+     * @param int   $options
+     * @param int   $depth
      * @return string
      * @throws \Exception
      */
@@ -1933,7 +2137,9 @@ END;
      */
     public function enrichObjectCustomFields($table, $obj)
     {
-        /** @var CustomFieldManager $customFields */
+        /**
+ * @var CustomFieldManager $customFields
+*/
         $customFields = $this->customFieldManager->getCustomFields($table, $obj->id);
         foreach ($customFields as $cf) {
             $obj->{$cf->name} = $cf->value;
@@ -1977,5 +2183,65 @@ END;
     {
         $dbUser = $this->getCurrentDBUser();
         return RestApiManager::getInstance()->getAccessTokenForUser($dbUser);
+    }
+
+    public function isSubordinateEmployee($supervisorId, $subordinateId)
+    {
+        $employee = new Employee();
+        $employee->Load('id = ? and supervisor = ?', [$subordinateId, $supervisorId]);
+
+        return ($supervisorId == $employee->supervisor && $subordinateId == $employee->id);
+    }
+
+    public function setSystemData($name, $value)
+    {
+        $sysData = new SystemData();
+        $sysData->Load('name = ?', [$name]);
+
+        if (!empty($sysData->id)) {
+            $sysData->value = $value;
+        } else {
+            $sysData->name = $name;
+            $sysData->value = $value;
+        }
+
+        return $sysData->Save();
+    }
+
+    public function getSystemData($name)
+    {
+        $sysData = new SystemData();
+        $sysData->Load('name = ?', [$name]);
+        if (!empty($sysData->id) && $sysData->name === $name) {
+            return $sysData->value;
+        }
+
+        return null;
+    }
+
+    public function getDataDirectory()
+    {
+        $dataDir = SettingsManager::getInstance()->getSetting('System: Data Directory');
+        if (!empty($dataDir) && is_dir($dataDir)) {
+            return $dataDir;
+        }
+
+        return CLIENT_BASE_PATH.'data/';
+    }
+
+    public function getExtensionMigrations()
+    {
+        return $this->extensionMigrations;
+    }
+
+    public function registerExtensionMigration(MigrationInterface $migration)
+    {
+        $this->extensionMigrations[$migration->getName()] = $migration;
+    }
+
+    public function isOpenSourceVersion()
+    {
+        $version = explode('.', VERSION);
+        return end($version) === 'OS';
     }
 }

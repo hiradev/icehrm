@@ -33,6 +33,7 @@ class EmployeeAdapter extends ReactModalAdapterBase {
   constructor(endPoint, tab, filter, orderBy) {
     super(endPoint, tab, filter, orderBy);
     this.fieldNameMap = {};
+    this.fieldNameMapOrig = {};
     this.hiddenFields = {};
     this.tableFields = {};
     this.formOnlyFields = {};
@@ -47,6 +48,7 @@ class EmployeeAdapter extends ReactModalAdapterBase {
     for (let i = 0; i < fields.length; i++) {
       field = fields[i];
       this.fieldNameMap[field.name] = field;
+      this.fieldNameMapOrig[field.textOrig] = field.textMapped;
       if (field.display === 'Hidden') {
         this.hiddenFields[field.name] = field;
       } else if (field.display === 'Table and Form' || field.display === 'Form') {
@@ -162,6 +164,10 @@ class EmployeeAdapter extends ReactModalAdapterBase {
     return tableColumns;
   }
 
+  getMappedText(text) {
+    return this.fieldNameMapOrig[text] ? this.fieldNameMapOrig[text] : text;
+  }
+
   showElement(element) {
     this.tableContainer.current.setCurrentElement(element);
   }
@@ -182,7 +188,7 @@ class EmployeeAdapter extends ReactModalAdapterBase {
       ['last_name', { label: 'Last Name', type: 'text', validation: '' }],
       ['nationality', { label: 'Nationality', type: 'select2', 'remote-source': ['Nationality', 'id', 'name'] }],
       ['birthday', { label: 'Date of Birth', type: 'date', validation: '' }],
-      ['gender', { label: 'Gender', type: 'select', source: [['Male', 'Male'], ['Female', 'Female'], ['Other', 'Other']] }],
+      ['gender', { label: 'Gender', type: 'select', source: [['Male', 'Male'], ['Female', 'Female'], ['Non-binary', 'Non-binary'], ['Other', 'Other'], ['Prefer not to say', 'Prefer not to say']] }],
       ['marital_status', { label: 'Marital Status', type: 'select', source: [['Married', 'Married'], ['Single', 'Single'], ['Divorced', 'Divorced'], ['Widowed', 'Widowed'], ['Other', 'Other']] }],
       ['ethnicity', {
         label: 'Ethnicity', type: 'select2', 'allow-null': true, 'remote-source': ['Ethnicity', 'id', 'name'],
@@ -766,7 +772,7 @@ class ArchivedEmployeeAdapter extends SubProfileEnabledAdapterBase {
       ['first_name', { label: 'First Name', type: 'text', validation: '' }],
       ['middle_name', { label: 'Middle Name', type: 'text', validation: 'none' }],
       ['last_name', { label: 'Last Name', type: 'text', validation: '' }],
-      ['gender', { label: 'Gender', type: 'select', source: [['Male', 'Male'], ['Female', 'Female'], ['Other', 'Other']] }],
+      ['gender', { label: 'Gender', type: 'select', source: [['Male', 'Male'], ['Female', 'Female'], ['Non-binary', 'Non-binary'], ['Other', 'Other'], ['Prefer not to say', 'Prefer not to say']] }],
       ['ssn_num', { label: 'SSN/NRIC', type: 'text', validation: 'none' }],
       ['nic_num', { label: 'NIC', type: 'text', validation: 'none' }],
       ['other_id', { label: 'Other ID', type: 'text', validation: 'none' }],
@@ -901,7 +907,7 @@ class EmployeeSkillAdapter extends ReactModalAdapterBase {
         label: 'Employee',
         type: 'select2',
         sort: 'none',
-        'allow-null': false,
+        'allow-null': true,
         'remote-source': ['Employee', 'id', 'first_name+last_name', 'getActiveSubordinateEmployees'],
       }],
       ['skill_id', {
@@ -1000,7 +1006,7 @@ class EmployeeEducationAdapter extends SubProfileEnabledAdapterBase {
         label: 'Employee',
         type: 'select2',
         sort: 'none',
-        'allow-null': false,
+        'allow-null': true,
         'remote-source': ['Employee', 'id', 'first_name+last_name', 'getActiveSubordinateEmployees'],
       }],
       ['education_id', {
@@ -1099,7 +1105,7 @@ class EmployeeCertificationAdapter extends SubProfileEnabledAdapterBase {
         label: 'Employee',
         type: 'select2',
         sort: 'none',
-        'allow-null': false,
+        'allow-null': true,
         'remote-source': ['Employee', 'id', 'first_name+last_name', 'getActiveSubordinateEmployees'],
       }],
       ['certification_id', {
@@ -1213,7 +1219,7 @@ class EmployeeLanguageAdapter extends SubProfileEnabledAdapterBase {
         label: 'Employee',
         type: 'select2',
         sort: 'none',
-        'allow-null': false,
+        'allow-null': true,
         'remote-source': ['Employee', 'id', 'first_name+last_name', 'getActiveSubordinateEmployees'],
       }],
       ['language_id', {
@@ -1481,6 +1487,107 @@ class EmployeeImmigrationAdapter extends SubProfileEnabledAdapterBase {
   }
 }
 
+class EmployeeCareerAdapter extends ReactModalAdapterBase {
+  getDataMapping() {
+    return [
+      'id',
+      'employee',
+      'job_title',
+      'date_start',
+      'date_end',
+      'employment_status',
+      'department',
+      'supervisor',
+    ];
+  }
+
+  getTableColumns() {
+    return [
+      {
+        title: 'Employee',
+        dataIndex: 'employee',
+        sorter: true,
+      },
+      {
+        title: 'Job Title',
+        dataIndex: 'job_title',
+        sorter: true,
+      },
+      {
+        title: 'Start Date',
+        dataIndex: 'date_start',
+        sorter: true,
+      },
+      {
+        title: 'End Date',
+        dataIndex: 'date_end',
+        sorter: true,
+      },
+      {
+        title: 'Department',
+        dataIndex: 'department',
+        sorter: true,
+      },
+      {
+        title: 'Supervisor',
+        dataIndex: 'supervisor',
+        sorter: true,
+      },
+      {
+        title: 'Employment Status',
+        dataIndex: 'employment_status',
+        sorter: true,
+      },
+    ];
+  }
+
+  getFormFields() {
+    return [
+      ['id', { label: 'ID', type: 'hidden' }],
+      ['employee', {
+        label: 'Employee',
+        type: 'select2',
+        sort: 'none',
+        'allow-null': false,
+        'remote-source': ['Employee', 'id', 'first_name+last_name', 'getActiveSubordinateEmployees'],
+      }],
+      ['job_title', { label: 'Job Title', type: 'select2', 'remote-source': ['JobTitle', 'id', 'name'] }],
+      ['date_start', { label: 'Start Date', type: 'date', validation: '' }],
+      ['date_end', { label: 'End Date', type: 'date', validation: 'none' }],
+      ['department', { label: 'Department', type: 'select2', 'remote-source': ['CompanyStructure', 'id', 'title'] }],
+      ['supervisor', {
+        label: 'Supervisor', type: 'select2', 'allow-null': true, 'remote-source': ['Employee', 'id', 'first_name+last_name'],
+      }],
+      ['employment_status', { label: 'Employment Status', type: 'select2', 'remote-source': ['EmploymentStatus', 'id', 'name'] }],
+      ['details', { label: 'Details', type: 'textarea', validation: 'none' }],
+    ];
+  }
+
+
+  getFilters() {
+    return [
+      ['employee', {
+        label: 'Employee',
+        type: 'select2',
+        sort: 'none',
+        'allow-null': true,
+        'remote-source': ['Employee', 'id', 'first_name+last_name', 'getActiveSubordinateEmployees'],
+      }],
+      ['job_title', { label: 'Job Title', type: 'select2', 'allow-null': true, 'remote-source': ['JobTitle', 'id', 'name'] }],
+      ['department', { label: 'Department', type: 'select2', 'allow-null': true, 'remote-source': ['CompanyStructure', 'id', 'title'] }],
+      ['supervisor', {
+        label: 'Supervisor', type: 'select2', 'allow-null': true, 'remote-source': ['Employee', 'id', 'first_name+last_name'],
+      }],
+      ['employment_status', { label: 'Employment Status', type: 'select2', 'allow-null': true, 'remote-source': ['EmploymentStatus', 'id', 'name'] }],
+
+    ];
+  }
+
+  isSubProfileTable() {
+    return this.user.user_level !== 'Admin' && this.user.user_level !== 'Restricted Admin';
+  }
+}
+
 
 module.exports = {
   EmployeeAdapter,
@@ -1493,4 +1600,5 @@ module.exports = {
   EmployeeDependentAdapter,
   EmergencyContactAdapter,
   EmployeeImmigrationAdapter,
+  EmployeeCareerAdapter,
 };

@@ -6,8 +6,6 @@ include("server.includes.inc.php");
 
 if(\Classes\SettingsManager::getInstance()->getSetting('Api: REST Api Enabled') == '1') {
 
-    \Utils\LogManager::getInstance()->info("Request: " . $_REQUEST);
-
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         http_response_code(200);
         exit();
@@ -27,13 +25,9 @@ if(\Classes\SettingsManager::getInstance()->getSetting('Api: REST Api Enabled') 
 
         $moduleManagerObj->setupRestEndPoints();
     }
-    $method = $_SERVER['REQUEST_METHOD'];
-    if (strtoupper($method) === 'GET') {
-        \Classes\IceRoute::dispatch($_GET['url'], $method);
-    } else {
-        $method = strtoupper($_REQUEST['method']);
-        \Classes\IceRoute::dispatch($_REQUEST['url'], $method);
-    }
+
+    $method = strtoupper($_REQUEST['method']);
+    \Classes\IceRoute::dispatch($_GET['url'], $method);
 
 
 }else{

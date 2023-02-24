@@ -3,6 +3,7 @@ namespace Classes\SystemTasks\DTO;
 
 class Task implements \JsonSerializable
 {
+    const PRIORITY_TOP = 1000;
     const PRIORITY_ERROR = 100;
     const PRIORITY_WARNING = 50;
     const PRIORITY_INFO = 20;
@@ -16,6 +17,7 @@ class Task implements \JsonSerializable
 
     /**
      * Task constructor.
+     *
      * @param $priority
      * @param $text
      */
@@ -70,7 +72,7 @@ class Task implements \JsonSerializable
     }
 
     /**
-     * @param mixed $link
+     * @param mixed  $link
      * @param string $action
      * @return Task
      */

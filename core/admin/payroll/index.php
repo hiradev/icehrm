@@ -43,7 +43,7 @@ include APP_BASE_PATH.'modulejslibs.inc.php';
                 <button class="cancelBtnTable btn" style="margin-right:5px;"><i class="fa fa-times-circle-o"></i> Cancel</button>
                 <button class="saveBtnTable btn btn-primary" style="margin-right:5px;"><i class="fa fa-save"></i> Save</button>
                 <button class="downloadBtnTable btn btn-primary" style="margin-right:5px;"><i class="fa fa-check"></i> Download</button>
-                <button class="completeBtnTable btn btn-primary" style="margin-right:5px;"><i class="fa fa-check-square-o"></i> Finalize</button>
+                <button class="completeBtnTable btn btn-primary" style="margin-right:5px;"><i class="fa fa-check-square-o"></i> Generate Payslips</button>
             </div>
         </div>
 
@@ -110,7 +110,7 @@ include APP_BASE_PATH.'modulejslibs.inc.php';
     modJsList['tabPayrollData'].setColumnFieldName('payroll_item');
     modJsList['tabPayrollData'].setTables('PayrollEmployee','PayrollColumn','PayrollData');
 
-    modJsList['tabPayrollColumn'] = new PayrollColumnAdapter('PayrollColumn','PayrollColumn','','deduction_group, colorder');
+    modJsList['tabPayrollColumn'] = new PayrollColumnAdapter('PayrollColumn','PayrollColumn','','colorder');
     modJsList['tabPayrollColumn'].setRemoteTable(true);
     //modJsList['tabPayrollColumnTemplate'] = new PayrollColumnTemplateAdapter('PayrollColumnTemplate','PayrollColumnTemplate');
 

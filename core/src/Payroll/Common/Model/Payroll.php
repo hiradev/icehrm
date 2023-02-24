@@ -9,6 +9,7 @@
 namespace Payroll\Common\Model;
 
 use Classes\BaseService;
+use Classes\IceResponse;
 use Classes\ModuleAccess;
 use Model\BaseModel;
 
@@ -36,7 +37,7 @@ class Payroll extends BaseModel
         $payrollIds = array();
         $payrollDataTemp = new PayrollData();
 
-        $payrollDataTemp->DB()->SetFetchMode(ADODB_FETCH_ASSOC);
+        // $payrollDataTemp->DB()->SetFetchMode(ADODB_FETCH_ASSOC);
         $rs = $payrollDataTemp->DB()->Execute(
             'select payroll from PayrollData where employee = ? group by payroll',
             array($currentEmp)
@@ -45,7 +46,11 @@ class Payroll extends BaseModel
             $payrollIds[] = $row['payroll'];
         }
         $payroll = new Payroll();
+        if (empty($payrollIds)) {
+            return [];
+        }
         $payrolls = $payroll->Find("id in (".implode(",", $payrollIds).") and status = 'Completed'");
+
         return $payrolls;
     }
 
@@ -59,5 +64,17 @@ class Payroll extends BaseModel
         return [
             new ModuleAccess('payroll', 'admin'),
         ];
+    }
+
+    /**
+     * @param $obj
+     * @return IceResponse
+     */
+    public function executePreSaveActions($obj)
+    {
+        if (empty($obj->status)) {
+            $obj->status = 'Draft';
+        }
+        return new IceResponse(IceResponse::SUCCESS, $obj);
     }
 }

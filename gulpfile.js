@@ -19,6 +19,7 @@ const cleanCSS = require('gulp-clean-css');
 const javascriptObfuscator = require('gulp-javascript-obfuscator');
 const ifElse = require('gulp-if-else');
 const clean = require('gulp-clean');
+const fs = require("fs");
 
 const env = process.argv.filter((item) => item.substr(0, 3) === '--e');
 let isProduction = false;
@@ -28,6 +29,20 @@ if (env.length === 1) {
 
 if (isProduction) {
   process.env.NODE_ENV = 'production';
+}
+
+const deleteFiles = (directory) => {
+  return fs.readdir(directory, (err, files) => {
+    if (err) {
+      return;
+    }
+
+    for (const file of files) {
+      fs.unlink(path.join(directory, file), (err) => {
+        //if (err) throw err;
+      });
+    }
+  });
 }
 
 gulp.task('clean', () => gulp.src('web/dist', { read: false, allowEmpty: true }).pipe(clean()));
@@ -243,11 +258,11 @@ gulp.task('admin-js', (done) => {
   const files = [
     'attendance',
     'company_structure',
+    'connection',
     'custom_fields',
     'clients',
     'charts',
     'dashboard',
-    'data',
     'documents',
     'employees',
     'fieldnames',
@@ -360,13 +375,72 @@ gulp.task('modules-js', (done) => {
     .pipe(gulp.dest('./web/dist'));
 });
 
+gulp.task('ejs', (done) => {
+  let extension = process.argv.filter((item) => item.substr(0, 3) === '--x');
+  if (extension.length === 1) {
+    extension = extension[0].substr(3);
+  }
+
+  [extensionName, extensionGroup] = extension.split('/');
+
+  try {
+    deleteFiles(`./extensions/${extension}/dist/`);
+  } catch (e) {
+
+  }
+
+
+  // map them to our stream function
+  return browserify({
+    entries: [`extensions/${extension}/web/js/index.js`],
+    basedir: '.',
+    debug: true,
+    cache: {},
+    packageCache: {},
+  })
+    .external(vendorsFlat)
+    .transform('babelify', {
+      plugins: [
+        ['@babel/plugin-proposal-class-properties', { loose: true }],
+      ],
+      presets: ['@babel/preset-env', '@babel/preset-react'],
+      extensions: ['.js', '.jsx'],
+    })
+    .transform(require('browserify-css'))
+    .bundle()
+    .pipe(source(`${extensionName}.js`))
+    .pipe(buffer())
+    .pipe(ifElse(!isProduction, () => sourcemaps.init({ loadMaps: true })))
+    .pipe(ifElse(isProduction, () => uglifyes(
+      {
+        compress: true,
+        mangle: {
+          reserved: [],
+        },
+      },
+    )))
+    .pipe(ifElse(isProduction, () => javascriptObfuscator({
+      compact: true,
+    })))
+    .pipe(ifElse(!isProduction, () => sourcemaps.write('./')))
+    .pipe(gulp.dest(`./extensions/${extension}/dist`));
+});
+
+gulp.task('clean-dist', (done) => {
+  deleteFiles(`./web/dist/`);
+  done();
+});
+
 
 gulp.task('watch', () => {
   gulp.watch('web/admin/src/*/*.js', gulp.series('admin-js'));
   gulp.watch('web/modules/src/*/*.js', gulp.series('modules-js'));
+  gulp.watch('web/components/*.js', gulp.series('admin-js', 'modules-js'));
+  gulp.watch('web/api/*.js', gulp.series('admin-js', 'modules-js'));
 });
 
 gulp.task('default', gulp.series(
+  'clean-dist',
   'compile-ant-less',
   'pack-js',
   'pack-css',
@@ -377,4 +451,11 @@ gulp.task('default', gulp.series(
   'vendor',
   'admin-js',
   'modules-js',
+));
+
+gulp.task('assets', gulp.series(
+  'compile-ant-less',
+  'pack-js',
+  'pack-css',
+  'login-css',
 ));

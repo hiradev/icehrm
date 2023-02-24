@@ -13,10 +13,10 @@ if(!defined('HOME_LINK_OTHERS')){
 }
 
 //Version
-define('VERSION', '29.0.0.OS');
-define('CACHE_VALUE', '29.0.0.OS.2020-04021509');
-define('VERSION_NUMBER', '290000');
-define('VERSION_DATE', '02/04/2021');
+define('VERSION', '32.4.0.OS');
+define('CACHE_VALUE', '32.4.0.OS.2023-01310520');
+define('VERSION_NUMBER', '320400');
+define('VERSION_DATE', '31/01/2023');
 
 if(!defined('CONTACT_EMAIL')){define('CONTACT_EMAIL','icehrm@gamonoid.com');}
 if(!defined('KEY_PREFIX')){define('KEY_PREFIX','IceHrm');}
@@ -35,9 +35,7 @@ define('ALL_CLIENT_BASE_PATH', '/var/www/icehrm.app/icehrmapp/');
 define('IS_CLOUD', false);
 define('LDAP_ENABLED', true);
 define('SAML_ENABLED', true);
-define('LEAVE_ENABLED', true);
-define('RECRUITMENT_ENABLED', false);
-define('APP_WEB_URL', 'https://icehrm.com');
+if(!defined('APP_WEB_URL')) {define('APP_WEB_URL', 'https://icehrm.com');}
 
 if (!defined('EXTENSIONS_URL')) {
     define('EXTENSIONS_URL', str_replace('/web/', '/extensions/', BASE_URL));

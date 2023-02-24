@@ -4,13 +4,13 @@
  */
 
 import AdapterBase from '../../../api/AdapterBase';
-import CustomFieldAdapter from '../../../api/CustomFieldAdapter';
+import ReactModalAdapterBase from "../../../api/ReactModalAdapterBase";
 
 /**
  * FieldNameAdapter
  */
 
-class FieldNameAdapter extends AdapterBase {
+class FieldNameAdapter extends ReactModalAdapterBase {
   getDataMapping() {
     return [
       'id',
@@ -31,6 +31,31 @@ class FieldNameAdapter extends AdapterBase {
     ];
   }
 
+  getTableColumns() {
+    return [
+      {
+        title: 'Name',
+        dataIndex: 'name',
+        sorter: true,
+      },
+      {
+        title: 'Original Text',
+        dataIndex: 'textOrig',
+        sorter: true,
+      },
+      {
+        title: 'Mapped Text',
+        dataIndex: 'textMapped',
+        sorter: true,
+      },
+      {
+        title: 'Display Status',
+        dataIndex: 'display',
+        sorter: true,
+      },
+    ];
+  }
+
   getFormFields() {
     return [
       ['id', { label: 'ID', type: 'hidden' }],
@@ -44,4 +69,4 @@ class FieldNameAdapter extends AdapterBase {
 }
 
 
-module.exports = { FieldNameAdapter, CustomFieldAdapter };
+module.exports = { FieldNameAdapter };

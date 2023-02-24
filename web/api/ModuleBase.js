@@ -44,6 +44,7 @@ class ModuleBase {
     this.currentProfile = null;
     this.permissions = {};
     this.baseUrl = null;
+    this.clientUrl = null;
     this.that = this;
   }
 
@@ -96,6 +97,10 @@ class ModuleBase {
     this.baseUrl = url;
   }
 
+  setClientUrl(url) {
+    this.clientUrl = url;
+  }
+
   setUser(user) {
     this.user = user;
   }
@@ -143,7 +148,7 @@ class ModuleBase {
 
   gt(key) {
     if (this.translations[key] === undefined || this.translations[key] === null) {
-      console.log("Tr:" + key);
+      console.log(`Tr:${key}`);
       return key;
     }
     return this.translations[key][0];
@@ -282,12 +287,22 @@ class ModuleBase {
     let values;
     const fields = this.getFormFields();
     const filterFields = this.getFilters();
+    const additionalFields = this.getAdditionalRemoteFields();
 
     if (filterFields != null) {
       for (let j = 0; j < filterFields.length; j++) {
-        values = this.getMetaFieldValues(filterFields[j][0], fields);
-        if (values == null || (values.type !== 'select' && values.type !== 'select2' && values.type !== 'select2multi')) {
+        values = filterFields[j][1];
+        if (values.type === 'select' || values.type === 'select2' || values.type === 'select2multi') {
           fields.push(filterFields[j]);
+        }
+      }
+    }
+
+    if (additionalFields != null) {
+      for (let j = 0; j < additionalFields.length; j++) {
+        values = additionalFields[j][1];
+        if (values.type === 'select' || values.type === 'select2' || values.type === 'select2multi') {
+          fields.push(additionalFields[j]);
         }
       }
     }
@@ -440,27 +455,27 @@ class ModuleBase {
     type = type.toLowerCase();
 
     const iconMap = {};
-    iconMap.pdf = 'fa fa-file-pdf-o';
-    iconMap.csv = 'fa fa fa-file-code-o';
-    iconMap.xls = 'fa fa-file-excel-o';
-    iconMap.xlsx = 'fa fa-file-excel-o';
-    iconMap.doc = 'fa fa-file-word-o';
-    iconMap.docx = 'fa fa-file-word-o';
-    iconMap.ppt = 'fa fa-file-powerpoint-o';
-    iconMap.pptx = 'fa fa-file-powerpoint-o';
-    iconMap.jpg = 'fa fa-file-image-o';
-    iconMap.jpeg = 'fa fa-file-image-o';
-    iconMap.gif = 'fa fa-file-image-o';
-    iconMap.png = 'fa fa-file-image-o';
-    iconMap.bmp = 'fa fa-file-image-o';
-    iconMap.txt = 'fa fa-file-text-o';
-    iconMap.rtf = 'fa fa-file-text-o';
+    iconMap.pdf = 'far fa-file-pdf';
+    iconMap.csv = 'fa far fa-file-code';
+    iconMap.xls = 'far fa-file-excel';
+    iconMap.xlsx = 'far fa-file-excel';
+    iconMap.doc = 'far fa-file-word';
+    iconMap.docx = 'far fa-file-word';
+    iconMap.ppt = 'far fa-file-powerpoint';
+    iconMap.pptx = 'far fa-file-powerpoint';
+    iconMap.jpg = 'far fa-file-image';
+    iconMap.jpeg = 'far fa-file-image';
+    iconMap.gif = 'far fa-file-image';
+    iconMap.png = 'far fa-file-image';
+    iconMap.bmp = 'far fa-file-image';
+    iconMap.txt = 'far fa-file-text';
+    iconMap.rtf = 'far fa-file-text';
 
 
     if (iconMap[type] !== undefined || iconMap[type] != null) {
       return iconMap[type];
     }
-    return 'fa fa-file-o';
+    return 'far fa-file';
   }
 
   getSourceMapping() {
@@ -824,6 +839,10 @@ class ModuleBase {
     return null;
   }
 
+  getAdditionalRemoteFields() {
+    return null;
+  }
+
   /**
      * Show the edit form for an item
      * @method edit
@@ -994,6 +1013,10 @@ class ModuleBase {
 
   cancelYesno() {
     $('#yesnoModel').modal('hide');
+  }
+
+  closeModal(id) {
+    $(id).modal('hide');
   }
 
   closePlainMessage() {
@@ -1183,7 +1206,7 @@ class ModuleBase {
               if (rmf.length > 3) {
                 key = `${key}_${rmf[3]}`;
               }
-              //value = this.fieldMasterData[`${rmf[0]}_${rmf[1]}_${rmf[2]}`][filters[prop]];
+              // value = this.fieldMasterData[`${rmf[0]}_${rmf[1]}_${rmf[2]}`][filters[prop]];
               value = this.fieldMasterData[key][filters[prop]];
               valueOrig = value;
             }
@@ -1259,6 +1282,10 @@ class ModuleBase {
     $(`#${this.getTableName()}_resetFilters`).hide();
     this.currentFilterString = '';
     this.get([]);
+  }
+
+  redirectToUrl(url) {
+    top.location.href = url;
   }
 
 
@@ -2102,7 +2129,7 @@ class ModuleBase {
         $(`${formId} #${fields[i][0]}`).html(object[fields[i][0]]);
       } else if (fields[i][1].type === 'placeholder') {
         if (fields[i][1]['remote-source'] !== undefined && fields[i][1]['remote-source'] != null) {
-          //const key = `${fields[i][1]['remote-source'][0]}_${fields[i][1]['remote-source'][1]}_${fields[i][1]['remote-source'][2]}`;
+          // const key = `${fields[i][1]['remote-source'][0]}_${fields[i][1]['remote-source'][1]}_${fields[i][1]['remote-source'][2]}`;
           const key = this.getRemoteSourceKey(fields[i]);
           placeHolderVal = this.fieldMasterData[key][object[fields[i][0]]];
         } else {
@@ -2682,6 +2709,27 @@ class ModuleBase {
     seed += arr.reduce((acc, item) => parseInt(item.charCodeAt(0), 10) + acc, 0);
 
     return `https://avatars.dicebear.com/api/initials/:${seed}.svg`;
+  }
+
+  downloadPdf(type, data) {
+    const url = `${this.clientUrl}service.php?a=pdf&h=${type}&data=${data}`;
+    window.open(url,'_blank');
+  }
+
+  checkIfUserEmailIsGoogleDomain(domain) {
+    let url = `https://dns.google.com/resolve?name=${domain}&type=MX`
+    $.get(url, (data) => {
+      if (data == null || data.Answer == null ) {
+        return;
+      }
+      let hasGoogle = data.Answer.filter((item) => item.data != null && item.data.includes('google.com'));
+      if (hasGoogle.length > 0) {
+        $("#googleConnectModel").modal({
+          backdrop: 'static'
+        });
+      }
+
+    });
   }
 }
 
